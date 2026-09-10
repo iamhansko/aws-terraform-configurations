@@ -30,7 +30,7 @@ data "aws_region" "current" {}
 variable "amazon_linux2023_ami_id" {
   type        = string
   default     = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
-  description = "(SSM parameter path; resolved by the aws_ssm_parameter data source)"
+  description = "Resolved by the aws_ssm_parameter data source)"
 }
 
 data "aws_ssm_parameter" "amazon_linux2023_ami_id" {
@@ -56,8 +56,8 @@ locals {
   }
 }
 
-resource "aws_iam_role_policy_attachment" "bastion_ec2_iam_role" {
-  role       = aws_iam_role.bastion_ec2_iam_role.name
+resource "aws_iam_role_policy_attachment" "vscode_ec2_iam_role" {
+  role       = aws_iam_role.vscode_ec2_iam_role.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
@@ -77,9 +77,9 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_iam_role" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-resource "aws_eks_access_policy_association" "bastion_ec2_iam_access_entry" {
+resource "aws_eks_access_policy_association" "vscode_ec2_iam_access_entry" {
   cluster_name  = aws_eks_cluster.eks_cluster.name
-  principal_arn = aws_iam_role.bastion_ec2_iam_role.arn
+  principal_arn = aws_iam_role.vscode_ec2_iam_role.arn
   policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
   access_scope {
     type = "cluster"
@@ -273,65 +273,68 @@ resource "aws_route" "private_subnetb_route" {
   route_table_id         = aws_route_table.private_subnetb_route_table.id
 }
 
-resource "aws_instance" "bastion_ec2" {
+resource "aws_instance" "vscode_ec2" {
   instance_type        = "t3.medium"
   key_name             = aws_key_pair.key_pair.key_name
   ami                  = data.aws_ssm_parameter.amazon_linux2023_ami_id.insecure_value
-  iam_instance_profile = aws_iam_instance_profile.bastion_ec2_instance_profile.name
+  iam_instance_profile = aws_iam_instance_profile.vscode_ec2_instance_profile.name
   tags = {
-    Name = "bastion"
+    Name = "vscode"
   }
-  user_data                   = <<EOT
-#!/bin/bash
-dnf update -yq
-dnf groupinstall -yq "Development Tools"
-dnf install -yq python3.13
-ln -sf /usr/bin/python3.13 /usr/bin/python
-python -m ensurepip --upgrade
+  user_data                   = <<-EOT
+    #!/bin/bash
+    dnf update -yq
+    dnf groupinstall -yq "Development Tools"
+    dnf install -yq python3.13
+    ln -sf /usr/bin/python3.13 /usr/bin/python
+    python -m ensurepip --upgrade
 
-export VSC_VERSION="4.102.3"
-wget https://github.com/coder/code-server/releases/download/v$VSC_VERSION/code-server-$VSC_VERSION-linux-amd64.tar.gz
-tar -xzf code-server-$VSC_VERSION-linux-amd64.tar.gz
-mv code-server-$VSC_VERSION-linux-amd64 /usr/local/lib/code-server
-ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server
+    export VSC_VERSION="4.102.3"
+    wget https://github.com/coder/code-server/releases/download/v$VSC_VERSION/code-server-$VSC_VERSION-linux-amd64.tar.gz
+    tar -xzf code-server-$VSC_VERSION-linux-amd64.tar.gz
+    mv code-server-$VSC_VERSION-linux-amd64 /usr/local/lib/code-server
+    ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server
 
-mkdir -p /home/ec2-user/.config/code-server
-cat <<EOF > /home/ec2-user/.config/code-server/config.yaml
-bind-addr: 0.0.0.0:8000
-auth: none
-cert: false
-EOF
-chown -R ec2-user:ec2-user /home/ec2-user/.config
+    mkdir -p /home/ec2-user/.config/code-server
+    cat <<EOF > /home/ec2-user/.config/code-server/config.yaml
+    bind-addr: 0.0.0.0:8000
+    auth: none
+    cert: false
+    EOF
+    chown -R ec2-user:ec2-user /home/ec2-user/.config
 
-cat <<EOF > /etc/systemd/system/code-server.service
-[Unit]
-Description=VS Code Server
-After=network.target
-[Service]
-Type=simple
-User=ec2-user
-ExecStart=/usr/local/bin/code-server --config /home/ec2-user/.config/code-server/config.yaml /home/ec2-user
-Restart=always
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable code-server
-systemctl start code-server
-EOT
+    cat <<EOF > /etc/systemd/system/code-server.service
+    [Unit]
+    Description=VS Code Server
+    After=network.target
+    [Service]
+    Type=simple
+    User=ec2-user
+    ExecStart=/usr/local/bin/code-server --config /home/ec2-user/.config/code-server/config.yaml /home/ec2-user
+    Restart=always
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+    systemctl daemon-reload
+    systemctl enable code-server
+    systemctl start code-server
+    EOT
   subnet_id                   = aws_subnet.public_subneta.id
   associate_public_ip_address = true
-  vpc_security_group_ids      = [aws_security_group.bastion_ec2_security_group.id]
+  vpc_security_group_ids      = [aws_security_group.vscode_ec2_security_group.id]
 }
 
-resource "time_sleep" "wait_bastion_ec2" {
-  depends_on = [aws_instance.bastion_ec2]
+resource "time_sleep" "wait_vscode_ec2" {
+  depends_on = [
+    aws_instance.vscode_ec2,
+    aws_iam_role_policy_attachment.vscode_ec2_iam_role
+  ]
   create_duration = "300s"
 }
 
-resource "aws_security_group" "bastion_ec2_security_group" {
-  description = "Security Group for Bastion EC2 SSH Connection"
-  name        = "bastion-sg"
+resource "aws_security_group" "vscode_ec2_security_group" {
+  description = "Security Group for VsCode EC2"
+  name        = "vscode-ec2-sg"
   ingress {
     cidr_blocks = ["0.0.0.0/0"]
     from_port   = 22
@@ -353,7 +356,7 @@ resource "aws_security_group" "bastion_ec2_security_group" {
   vpc_id = aws_vpc.vpc.id
 }
 
-resource "aws_iam_role" "bastion_ec2_iam_role" {
+resource "aws_iam_role" "vscode_ec2_iam_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -366,8 +369,8 @@ resource "aws_iam_role" "bastion_ec2_iam_role" {
   })
 }
 
-resource "aws_iam_instance_profile" "bastion_ec2_instance_profile" {
-  role = aws_iam_role.bastion_ec2_iam_role.name
+resource "aws_iam_instance_profile" "vscode_ec2_instance_profile" {
+  role = aws_iam_role.vscode_ec2_iam_role.name
 }
 
 resource "aws_key_pair" "key_pair" {
@@ -411,16 +414,16 @@ resource "aws_iam_openid_connect_provider" "eks_oidc_provider" {
   client_id_list = ["sts.amazonaws.com"]
 }
 
-resource "aws_eks_access_entry" "bastion_ec2_iam_access_entry" {
+resource "aws_eks_access_entry" "vscode_ec2_iam_access_entry" {
   cluster_name  = aws_eks_cluster.eks_cluster.name
-  principal_arn = aws_iam_role.bastion_ec2_iam_role.arn
+  principal_arn = aws_iam_role.vscode_ec2_iam_role.arn
   type          = "STANDARD"
 }
 
-resource "aws_vpc_security_group_ingress_rule" "bastion_ec2_security_group_ingress" {
+resource "aws_vpc_security_group_ingress_rule" "vscode_ec2_security_group_ingress" {
   security_group_id            = aws_eks_cluster.eks_cluster.vpc_config[0].cluster_security_group_id
   ip_protocol                  = -1
-  referenced_security_group_id = aws_security_group.bastion_ec2_security_group.id
+  referenced_security_group_id = aws_security_group.vscode_ec2_security_group.id
 }
 
 resource "aws_eks_fargate_profile" "kubesystem_fargate_profile" {
@@ -457,93 +460,93 @@ resource "aws_ssm_association" "karpenter_association" {
   wait_for_success_timeout_seconds = 300
   targets {
     key    = "InstanceIds"
-    values = [aws_instance.bastion_ec2.id]
+    values = [aws_instance.vscode_ec2.id]
   }
   parameters = {
-    commands = <<EOT
-dnf install -yq git
-dnf install -yq docker
-dnf install -yq bash-completion
-systemctl enable --now docker
-# usermod -aG docker ec2-user
-# newgrp docker
-chmod 666 /var/run/docker.sock
+    commands = <<-EOT
+      dnf install -yq git
+      dnf install -yq docker
+      dnf install -yq bash-completion
+      systemctl enable --now docker
+      # usermod -aG docker ec2-user
+      # newgrp docker
+      chmod 666 /var/run/docker.sock
 
-su - ec2-user << 'EOF'
-export HOME=/home/ec2-user
-cd $HOME
-curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.36.2/2026-07-05/bin/linux/amd64/kubectl
-chmod +x ./kubectl
-mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH
-echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc
-echo 'source /usr/share/bash-completion/bash_completion' >> ~/.bashrc
-echo 'source <(kubectl completion bash)' >> ~/.bashrc
-echo 'alias k=kubectl' >>~/.bashrc
-echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
+      su - ec2-user << 'EOF'
+      export HOME=/home/ec2-user
+      cd $HOME
+      curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.36.2/2026-07-05/bin/linux/amd64/kubectl
+      chmod +x ./kubectl
+      mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH
+      echo 'export PATH=$HOME/bin:$PATH' >> ~/.bashrc
+      echo 'source /usr/share/bash-completion/bash_completion' >> ~/.bashrc
+      echo 'source <(kubectl completion bash)' >> ~/.bashrc
+      echo 'alias k=kubectl' >>~/.bashrc
+      echo 'complete -o default -F __start_kubectl k' >>~/.bashrc
 
-ARCH=amd64
-PLATFORM=$(uname -s)_$ARCH
-curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
-tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
-sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+      ARCH=amd64
+      PLATFORM=$(uname -s)_$ARCH
+      curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+      tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+      sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
 
-curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-chmod 700 get_helm.sh
-./get_helm.sh
+      curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+      chmod 700 get_helm.sh
+      ./get_helm.sh
 
-aws eks update-kubeconfig --name ${aws_eks_cluster.eks_cluster.name}
+      aws eks update-kubeconfig --name ${aws_eks_cluster.eks_cluster.name}
 
-echo $'#!/bin/bash
-export KARPENTER_NAMESPACE="kube-system"
-export KARPENTER_VERSION="1.14.0"
-export K8S_VERSION="1.36"
-export AWS_PARTITION="aws"
-export CLUSTER_NAME="${aws_eks_cluster.eks_cluster.name}"
-export AWS_DEFAULT_REGION="${data.aws_region.current.region}"
-export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-export TEMPOUT="$(mktemp)"
-helm registry logout public.ecr.aws
-helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
---version "$KARPENTER_VERSION" \
---namespace "$KARPENTER_NAMESPACE" --create-namespace \
---set "settings.clusterName=$CLUSTER_NAME" \
---set controller.resources.requests.cpu=1 \
---set controller.resources.requests.memory=1Gi \
---set controller.resources.limits.cpu=1 \
---set controller.resources.limits.memory=1Gi \
---set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="${aws_iam_role.karpenter_controller_iam_role.arn}" \
---wait' > install_karpenter.sh
-chmod +x install_karpenter.sh
+      echo $'#!/bin/bash
+      export KARPENTER_NAMESPACE="kube-system"
+      export KARPENTER_VERSION="1.14.0"
+      export K8S_VERSION="1.36"
+      export AWS_PARTITION="aws"
+      export CLUSTER_NAME="${aws_eks_cluster.eks_cluster.name}"
+      export AWS_DEFAULT_REGION="${data.aws_region.current.region}"
+      export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+      export TEMPOUT="$(mktemp)"
+      helm registry logout public.ecr.aws
+      helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+      --version "$KARPENTER_VERSION" \
+      --namespace "$KARPENTER_NAMESPACE" --create-namespace \
+      --set "settings.clusterName=$CLUSTER_NAME" \
+      --set controller.resources.requests.cpu=1 \
+      --set controller.resources.requests.memory=1Gi \
+      --set controller.resources.limits.cpu=1 \
+      --set controller.resources.limits.memory=1Gi \
+      --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="${aws_iam_role.karpenter_controller_iam_role.arn}" \
+      --wait' > install_karpenter.sh
+      chmod +x install_karpenter.sh
 
-sleep 10
-kubectl -n kube-system rollout restart deployment coredns
-EOF
-EOT
+      sleep 10
+      kubectl -n kube-system rollout restart deployment coredns
+      EOF
+      EOT
   }
   depends_on = [aws_eks_fargate_profile.kubesystem_fargate_profile]
 }
 
 resource "aws_iam_role" "karpenter_controller_iam_role" {
-  assume_role_policy = <<EOT
-{
-  "Version": "2012-10-17",
-  "Statement": [
-      {
-          "Effect": "Allow",
-          "Principal": {
-              "Federated": "${aws_iam_openid_connect_provider.eks_oidc_provider.arn}"
-          },
-          "Action": "sts:AssumeRoleWithWebIdentity",
-          "Condition": {
-              "StringEquals": {
-                  "${element(split("//", aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer), 1)}:sub": "system:serviceaccount:kube-system:karpenter",
-                  "${element(split("//", aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer), 1)}:aud": "sts.amazonaws.com"
+  assume_role_policy = <<-EOT
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+          {
+              "Effect": "Allow",
+              "Principal": {
+                  "Federated": "${aws_iam_openid_connect_provider.eks_oidc_provider.arn}"
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                  "StringEquals": {
+                      "${element(split("//", aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer), 1)}:sub": "system:serviceaccount:kube-system:karpenter",
+                      "${element(split("//", aws_eks_cluster.eks_cluster.identity[0].oidc[0].issuer), 1)}:aud": "sts.amazonaws.com"
+                  }
               }
           }
-      }
-  ]
-}
-EOT
+      ]
+    }
+    EOT
 }
 
 resource "aws_iam_role" "karpenter_node_iam_role" {
@@ -570,159 +573,159 @@ resource "aws_ssm_association" "batch_association" {
   wait_for_success_timeout_seconds = 600
   targets {
     key    = "InstanceIds"
-    values = [aws_instance.bastion_ec2.id]
+    values = [aws_instance.vscode_ec2.id]
   }
   depends_on = [aws_ssm_association.karpenter_association]
   parameters = {
-    commands = <<EOT
-su - ec2-user << 'SSMEOF'
-set -euo pipefail
-export DEFAULT_NAMESPACE=batch-default
-export CUSTOM_NAMESPACE=batch-app
-cat - <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: $DEFAULT_NAMESPACE
-  labels:
-    name: $DEFAULT_NAMESPACE
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: $CUSTOM_NAMESPACE
-  labels:
-    name: $CUSTOM_NAMESPACE
-EOF
-cat - <<EOF | kubectl apply -f -
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aws-batch-cluster-role
-rules:
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["list"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["daemonsets", "deployments", "statefulsets", "replicasets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["clusterroles", "clusterrolebindings"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aws-batch-cluster-role-binding
-subjects:
-- kind: User
-  name: aws-batch
-  apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: ClusterRole
-  name: aws-batch-cluster-role
-  apiGroup: rbac.authorization.k8s.io
-EOF
+    commands = <<-EOT
+      su - ec2-user << 'SSMEOF'
+      set -euo pipefail
+      export DEFAULT_NAMESPACE=batch-default
+      export CUSTOM_NAMESPACE=batch-app
+      cat - <<EOF | kubectl apply -f -
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: $DEFAULT_NAMESPACE
+        labels:
+          name: $DEFAULT_NAMESPACE
+      ---
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: $CUSTOM_NAMESPACE
+        labels:
+          name: $CUSTOM_NAMESPACE
+      EOF
+      cat - <<EOF | kubectl apply -f -
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: aws-batch-cluster-role
+      rules:
+        - apiGroups: [""]
+          resources: ["namespaces"]
+          verbs: ["get"]
+        - apiGroups: [""]
+          resources: ["nodes"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: [""]
+          resources: ["pods"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: [""]
+          resources: ["events"]
+          verbs: ["list"]
+        - apiGroups: [""]
+          resources: ["configmaps"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["apps"]
+          resources: ["daemonsets", "deployments", "statefulsets", "replicasets"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["rbac.authorization.k8s.io"]
+          resources: ["clusterroles", "clusterrolebindings"]
+          verbs: ["get", "list"]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: aws-batch-cluster-role-binding
+      subjects:
+      - kind: User
+        name: aws-batch
+        apiGroup: rbac.authorization.k8s.io
+      roleRef:
+        kind: ClusterRole
+        name: aws-batch-cluster-role
+        apiGroup: rbac.authorization.k8s.io
+      EOF
 
-cat - <<EOF | kubectl apply -f -
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: aws-batch-compute-environment-role
-  namespace: $DEFAULT_NAMESPACE
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get", "list"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: aws-batch-compute-environment-role-binding
-  namespace: $DEFAULT_NAMESPACE
-subjects:
-- kind: User
-  name: aws-batch
-  apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: Role
-  name: aws-batch-compute-environment-role
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: aws-batch-compute-environment-role
-  namespace: $CUSTOM_NAMESPACE
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get", "list"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
-    verbs: ["get", "list"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: aws-batch-compute-environment-role-binding
-  namespace: $CUSTOM_NAMESPACE
-subjects:
-- kind: User
-  name: aws-batch
-  apiGroup: rbac.authorization.k8s.io
-roleRef:
-  kind: Role
-  name: aws-batch-compute-environment-role
-  apiGroup: rbac.authorization.k8s.io
-EOF
+      cat - <<EOF | kubectl apply -f -
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: aws-batch-compute-environment-role
+        namespace: $DEFAULT_NAMESPACE
+      rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+          verbs: ["create", "get", "list", "watch", "delete", "patch"]
+        - apiGroups: [""]
+          resources: ["serviceaccounts"]
+          verbs: ["get", "list"]
+        - apiGroups: ["rbac.authorization.k8s.io"]
+          resources: ["roles", "rolebindings"]
+          verbs: ["get", "list"]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: aws-batch-compute-environment-role-binding
+        namespace: $DEFAULT_NAMESPACE
+      subjects:
+      - kind: User
+        name: aws-batch
+        apiGroup: rbac.authorization.k8s.io
+      roleRef:
+        kind: Role
+        name: aws-batch-compute-environment-role
+        apiGroup: rbac.authorization.k8s.io
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: aws-batch-compute-environment-role
+        namespace: $CUSTOM_NAMESPACE
+      rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+          verbs: ["create", "get", "list", "watch", "delete", "patch"]
+        - apiGroups: [""]
+          resources: ["serviceaccounts"]
+          verbs: ["get", "list"]
+        - apiGroups: ["rbac.authorization.k8s.io"]
+          resources: ["roles", "rolebindings"]
+          verbs: ["get", "list"]
+      ---
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: aws-batch-compute-environment-role-binding
+        namespace: $CUSTOM_NAMESPACE
+      subjects:
+      - kind: User
+        name: aws-batch
+        apiGroup: rbac.authorization.k8s.io
+      roleRef:
+        kind: Role
+        name: aws-batch-compute-environment-role
+        apiGroup: rbac.authorization.k8s.io
+      EOF
 
-eksctl create iamidentitymapping --region ${data.aws_region.current.region} \
---cluster ${aws_eks_cluster.eks_cluster.name} \
---arn "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/AWSServiceRoleForBatch" \
---username aws-batch
+      eksctl create iamidentitymapping --region ${data.aws_region.current.region} \
+      --cluster ${aws_eks_cluster.eks_cluster.name} \
+      --arn "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/AWSServiceRoleForBatch" \
+      --username aws-batch
 
-# aws-auth ConfigMap changes take time to propagate to the EKS control plane's
-# authenticator. Poll until the aws-batch identity can actually authorize against
-# the namespace before reporting success, otherwise AWS Batch's CreateComputeEnvironment
-# call can race ahead and fail with "Unable to validate Kubernetes Namespace".
-rbac_ready=false
-for i in $(seq 1 30); do
-  if kubectl auth can-i get namespace/$DEFAULT_NAMESPACE --as=aws-batch >/dev/null 2>&1; then
-    echo "aws-batch identity has access to $DEFAULT_NAMESPACE"
-    rbac_ready=true
-    break
-  fi
-  echo "Waiting for aws-auth RBAC mapping to propagate... ($i/30)"
-  sleep 10
-done
-if [ "$rbac_ready" != "true" ]; then
-  echo "aws-batch identity still lacks access to $DEFAULT_NAMESPACE after 5 minutes" >&2
-  exit 1
-fi
-SSMEOF
-EOT
+      # aws-auth ConfigMap changes take time to propagate to the EKS control plane's
+      # authenticator. Poll until the aws-batch identity can actually authorize against
+      # the namespace before reporting success, otherwise AWS Batch's CreateComputeEnvironment
+      # call can race ahead and fail with "Unable to validate Kubernetes Namespace".
+      rbac_ready=false
+      for i in $(seq 1 30); do
+        if kubectl auth can-i get namespace/$DEFAULT_NAMESPACE --as=aws-batch >/dev/null 2>&1; then
+          echo "aws-batch identity has access to $DEFAULT_NAMESPACE"
+          rbac_ready=true
+          break
+        fi
+        echo "Waiting for aws-auth RBAC mapping to propagate... ($i/30)"
+        sleep 10
+      done
+      if [ "$rbac_ready" != "true" ]; then
+        echo "aws-batch identity still lacks access to $DEFAULT_NAMESPACE after 5 minutes" >&2
+        exit 1
+      fi
+      SSMEOF
+      EOT
   }
 }
 
@@ -815,7 +818,7 @@ resource "aws_batch_job_queue" "batch_job_queue" {
   name = "${var.prefix}-batch-job-queue"
 }
 
-output "vs_code" {
-  value       = "http://${aws_instance.bastion_ec2.public_ip}:8000"
-  description = "VsCode on BastionEC2"
+output "vscode" {
+  value       = "http://${aws_instance.vscode_ec2.public_ip}:8000"
+  description = "VsCode EC2"
 }
