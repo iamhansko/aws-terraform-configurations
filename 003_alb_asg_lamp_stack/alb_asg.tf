@@ -300,7 +300,6 @@ resource "aws_autoscaling_policy" "auto_scaling_policy" {
     }
     target_value = 30
   }
-  # CloudFormation generated this name automatically; Terraform requires it, so it is derived from the stack name.
   name = "${var.prefix}-auto-scaling-policy"
 }
 
