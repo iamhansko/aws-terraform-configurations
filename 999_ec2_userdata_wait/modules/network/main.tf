@@ -1,39 +1,10 @@
 data "aws_region" "current" {}
 
-variable "vpc_cidr_block" {
-  type        = string
-  default     = "10.0.0.0/16"
-  description = "CIDR block for the VPC"
-}
-
-variable "vpc_name" {
-  type        = string
-  default     = "stem-vpc"
-  description = "Name tag for the VPC"
-}
-
-variable "public_subnet_name" {
-  type        = string
-  default     = "stem-public"
-  description = "Base name tag for public subnets"
-}
-
-variable "private_subnet_name" {
-  type        = string
-  default     = "stem-private"
-  description = "Base name tag for private subnets"
-}
-
-variable "internet_gateway_name" {
-  type        = string
-  default     = "stem-igw"
-  description = "Name tag for the Internet Gateway"
-}
-
-variable "nat_gateway_name" {
-  type        = string
-  default     = "stem-natgw"
-  description = "Base name tag for NAT Gateways"
+locals {
+  # Always carve out /24 subnets regardless of the VPC's own prefix length,
+  # matching the previous element(range()) construction without the
+  # throwaway list indirection.
+  subnet_newbits = 24 - tonumber(split("/", var.vpc_cidr_block)[1])
 }
 
 resource "aws_vpc" "vpc" {
@@ -46,7 +17,7 @@ resource "aws_vpc" "vpc" {
 
 resource "aws_subnet" "private_subnet_a" {
   availability_zone = "${data.aws_region.current.region}a"
-  cidr_block        = element([for __i in range(16) : cidrsubnet(aws_vpc.vpc.cidr_block, 32 - 8 - tonumber(split("/", aws_vpc.vpc.cidr_block)[1]), __i)], 0)
+  cidr_block        = cidrsubnet(var.vpc_cidr_block, local.subnet_newbits, 0)
   tags = {
     Name                              = join("-", [var.private_subnet_name, "a"])
     "kubernetes.io/role/internal-elb" = 1
@@ -56,7 +27,7 @@ resource "aws_subnet" "private_subnet_a" {
 
 resource "aws_subnet" "private_subnet_b" {
   availability_zone = "${data.aws_region.current.region}b"
-  cidr_block        = element([for __i in range(16) : cidrsubnet(aws_vpc.vpc.cidr_block, 32 - 8 - tonumber(split("/", aws_vpc.vpc.cidr_block)[1]), __i)], 1)
+  cidr_block        = cidrsubnet(var.vpc_cidr_block, local.subnet_newbits, 1)
   tags = {
     Name                              = join("-", [var.private_subnet_name, "b"])
     "kubernetes.io/role/internal-elb" = 1
@@ -66,7 +37,7 @@ resource "aws_subnet" "private_subnet_b" {
 
 resource "aws_subnet" "public_subnet_a" {
   availability_zone = "${data.aws_region.current.region}a"
-  cidr_block        = element([for __i in range(16) : cidrsubnet(aws_vpc.vpc.cidr_block, 32 - 8 - tonumber(split("/", aws_vpc.vpc.cidr_block)[1]), __i)], 3)
+  cidr_block        = cidrsubnet(var.vpc_cidr_block, local.subnet_newbits, 3)
   tags = {
     Name                     = join("-", [var.public_subnet_name, "a"])
     "kubernetes.io/role/elb" = 1
@@ -76,7 +47,7 @@ resource "aws_subnet" "public_subnet_a" {
 
 resource "aws_subnet" "public_subnet_b" {
   availability_zone = "${data.aws_region.current.region}b"
-  cidr_block        = element([for __i in range(16) : cidrsubnet(aws_vpc.vpc.cidr_block, 32 - 8 - tonumber(split("/", aws_vpc.vpc.cidr_block)[1]), __i)], 4)
+  cidr_block        = cidrsubnet(var.vpc_cidr_block, local.subnet_newbits, 4)
   tags = {
     Name                     = join("-", [var.public_subnet_name, "b"])
     "kubernetes.io/role/elb" = 1

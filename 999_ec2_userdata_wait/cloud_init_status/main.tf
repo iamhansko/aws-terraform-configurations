@@ -1,40 +1,32 @@
-variable "aws_region" {
-  type        = string
-  default     = null
-  description = "Target AWS region. Defaults to the provider chain (AWS_REGION)."
-}
-
 data "aws_region" "current" {}
-
-variable "amazon_linux2023_ami_id" {
-  type        = string
-  default     = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64"
-  description = "Resolved by the aws_ssm_parameter data source"
-}
 
 data "aws_ssm_parameter" "amazon_linux2023_ami_id" {
   name = var.amazon_linux2023_ami_id
 }
 
 module "network" {
-  source = "./modules/network"
+  source = "../modules/network"
 }
 
 module "key_pair" {
-  source   = "./modules/key_pair"
-  key_name = "ec2-keypair"
+  source   = "../modules/key_pair"
+  key_name = var.key_pair_name
 }
 
 module "vscode_ec2" {
-  source = "./modules/vscode_ec2"
+  source = "../modules/vscode_ec2"
 
-  name          = "vscode"
-  instance_type = "t3.small"
+  name          = var.vscode_instance_name
+  instance_type = var.vscode_instance_type
   ami_id        = data.aws_ssm_parameter.amazon_linux2023_ami_id.insecure_value
   key_name      = module.key_pair.key_name
 
   vpc_id    = module.network.vpc_id
   subnet_id = module.network.public_subnet_a_id
+
+  additional_user_data = <<-EOT
+    date > /home/ec2-user/COMMAND0.md
+  EOT
 }
 
 resource "aws_ssm_association" "vscode_association_1" {

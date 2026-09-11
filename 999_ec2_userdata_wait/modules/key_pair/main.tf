@@ -1,8 +1,3 @@
-variable "key_name" {
-  type        = string
-  description = "Name of the EC2 key pair to create"
-}
-
 resource "tls_private_key" "key_pair" {
   algorithm = "RSA"
   rsa_bits  = 4096

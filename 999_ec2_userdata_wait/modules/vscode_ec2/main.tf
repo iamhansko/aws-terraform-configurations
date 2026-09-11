@@ -1,47 +1,3 @@
-variable "name" {
-  type        = string
-  default     = "vscode"
-  description = "Name tag for the VS Code EC2 instance"
-}
-
-variable "instance_type" {
-  type        = string
-  default     = "t3.small"
-  description = "EC2 instance type"
-}
-
-variable "ami_id" {
-  type        = string
-  description = "AMI ID to launch the instance from"
-}
-
-variable "key_name" {
-  type        = string
-  description = "EC2 key pair name to attach to the instance"
-}
-
-variable "vpc_id" {
-  type        = string
-  description = "VPC ID where the security group is created"
-}
-
-variable "subnet_id" {
-  type        = string
-  description = "Subnet ID where the instance is launched"
-}
-
-variable "associate_public_ip_address" {
-  type        = bool
-  default     = true
-  description = "Whether to associate a public IP address with the instance"
-}
-
-variable "marker_file_path" {
-  type        = string
-  default     = "/run/terraform"
-  description = "Directory used to store userdata/command completion marker files"
-}
-
 resource "aws_iam_role_policy_attachment" "vscode_ec2_iam_role" {
   role       = aws_iam_role.vscode_ec2_iam_role.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -93,13 +49,11 @@ resource "aws_instance" "vscode_ec2" {
     systemctl enable code-server
     systemctl start code-server
 
-    date > /home/ec2-user/BEFORE_MARK.md
-
+    %{if var.marker_file_path != null~}
     mkdir -p ${var.marker_file_path}
     touch ${var.marker_file_path}/userdata
-
-    sleep 120
-    date > /home/ec2-user/AFTER_MARK.md
+    %{endif~}
+    ${var.additional_user_data}
     EOT
   subnet_id                   = var.subnet_id
   associate_public_ip_address = var.associate_public_ip_address
