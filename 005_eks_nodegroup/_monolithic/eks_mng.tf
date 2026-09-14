@@ -70,7 +70,7 @@ locals {
       }
     }
   }
-  is_windows = can(regex("^[A-Za-z]:", abspath(path.root)))
+  marker_file_path = "/run/terraform"
 }
 
 resource "tls_private_key" "key_pair" {
@@ -365,154 +365,13 @@ resource "aws_instance" "vscode_ec2" {
     systemctl enable code-server
     systemctl start code-server
 
-    sudo -Eu ec2-user bash << 'EOF'
-    cd /home/ec2-user
-    mkdir -p /home/ec2-user/bin
-    curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.30.0/2024-05-12/bin/linux/amd64/kubectl
-    chmod +x kubectl
-    mv kubectl /home/ec2-user/bin/kubectl
-    export PATH=/home/ec2-user/bin:$PATH
-    echo "export PATH=/home/ec2-user/bin:$PATH" >> ~/.bashrc
-    echo "alias k=kubectl" >> ~/.bashrc
-    echo "complete -o default -F __start_kubectl k" >> ~/.bashrc
-    echo "source <(kubectl completion bash)" >> ~/.bashrc
-
-    aws eks update-kubeconfig --region ${data.aws_region.current.region} --name ${aws_eks_cluster.eks_cluster.name}
-
-    curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-    sudo mv /tmp/eksctl /usr/local/bin
-
-    curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > /home/ec2-user/get_helm.sh
-    chmod 700 /home/ec2-user/get_helm.sh
-    /home/ec2-user/get_helm.sh
-
-    mkdir -p /home/ec2-user/userdata
-    touch /home/ec2-user/userdata/complete
+    mkdir -p ${local.marker_file_path}
+    touch ${local.marker_file_path}/userdata
     EOF
     EOT
   subnet_id                   = aws_subnet.public_subnet_a.id
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.vscode_ec2_security_group.id, aws_eks_cluster.eks_cluster.vpc_config[0].cluster_security_group_id]
-}
-
-resource "null_resource" "vscode_ec2_wait_unix" {
-  count = local.is_windows ? 0 : 1
-  depends_on = [
-    aws_instance.vscode_ec2,
-    aws_iam_role_policy_attachment.vscode_ec2_iam_role,
-  ]
-  provisioner "local-exec" {
-    interpreter = ["bash", "-c"]
-    command     = <<-EOF
-      set -e
-      for i in $(seq 1 60); do
-        PING=$(aws ssm describe-instance-information \
-        --filters "Key=InstanceIds,Values=${aws_instance.vscode_ec2.id}" \
-        --region "${data.aws_region.current.region}" \
-        --query "InstanceInformationList[0].PingStatus" \
-        --output text 2>/dev/null || echo "None")
-        if [ "$PING" = "Online" ]; then
-          echo "SSM Online"
-          break
-        fi
-        echo "SSM: $PING ($i/60)"
-        sleep 10
-      done
-      if [ "$PING" != "Online" ]; then
-        echo "SSM: Failed" >&2
-        exit 1
-      fi
-
-      COMMAND=""
-      while true; do
-        if [ -z "$COMMAND" ]; then
-          COMMAND=$(aws ssm send-command \
-          --document-name "AWS-RunShellScript" \
-          --parameters 'commands=["cat /home/ec2-user/userdata/complete"]' \
-          --instance-ids "${aws_instance.vscode_ec2.id}" \
-          --region "${data.aws_region.current.region}" \
-          --query "Command.CommandId" --output text 2>/dev/null || echo "")
-          if [ -z "$COMMAND" ]; then
-            sleep 10
-            continue
-          fi
-        fi
-
-        STATUS=$(aws ssm get-command-invocation \
-        --command-id "$COMMAND" \
-        --instance-id "${aws_instance.vscode_ec2.id}" \
-        --region "${data.aws_region.current.region}" \
-        --query "Status" --output text 2>/dev/null || echo "Pending")
-        echo "COMMAND: $STATUS"
-
-        case "$STATUS" in Success) break;;esac
-        sleep 10
-      done
-    EOF
-  }
-}
-
-resource "null_resource" "vscode_ec2_wait_windows" {
-  count = local.is_windows ? 1 : 0
-  depends_on = [
-    aws_instance.vscode_ec2,
-    aws_iam_role_policy_attachment.vscode_ec2_iam_role,
-  ]
-  provisioner "local-exec" {
-    interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]
-    command     = <<-EOF
-      $ErrorActionPreference = "Stop"
-      $InstanceId = "${aws_instance.vscode_ec2.id}"
-      $Region     = "${data.aws_region.current.region}"
-
-      $Ping = "None"
-      for ($i = 1; $i -le 60; $i++) {
-        $Ping = aws ssm describe-instance-information `
-        --filters "Key=InstanceIds,Values=$InstanceId" `
-        --region $Region `
-        --query "InstanceInformationList[0].PingStatus" `
-        --output text 2>$null
-        if (-not $Ping) { $Ping = "None" }
-        if ($Ping -eq "Online") {
-          Write-Host "SSM Online"
-          break
-        }
-        Write-Host "SSM: $Ping ($i/60)"
-        Start-Sleep -Seconds 10
-      }
-      if ($Ping -ne "Online") {
-        Write-Error "SSM: Failed"
-        exit 1
-      }
-
-      $CommandId = ""
-      while ($true) {
-        if (-not $CommandId) {
-          $CommandId = aws ssm send-command `
-          --document-name "AWS-RunShellScript" `
-          --parameters 'commands=["cat /home/ec2-user/userdata/complete"]' `
-          --instance-ids $InstanceId `
-          --region $Region `
-          --query "Command.CommandId" --output text 2>$null
-          if (-not $CommandId) {
-            Start-Sleep -Seconds 10
-            continue
-          }
-        }
-
-        $Status = aws ssm get-command-invocation `
-        --command-id $CommandId `
-        --instance-id $InstanceId `
-        --region $Region `
-        --query "Status" --output text 2>$null
-        if (-not $Status) { $Status = "Pending" }
-        Write-Host "COMMAND: $Status"
-
-        if ($Status -eq "Success") { break }
-        Start-Sleep -Seconds 10
-      }
-    EOF
-  }
 }
 
 resource "aws_security_group" "vscode_ec2_security_group" {
@@ -656,6 +515,22 @@ resource "aws_ssm_association" "document_association" {
   parameters = {
     commands = <<-EOT
       echo $'#EKS Managed Node Group' > /home/ec2-user/README.md
+      EOT
+  }
+}
+
+resource "aws_ssm_association" "document_association" {
+  name                             = "AWS-RunShellScript"
+  wait_for_success_timeout_seconds = 300
+  targets {
+    key    = "InstanceIds"
+    values = [module.vscode_ec2.instance_id]
+  }
+  parameters = {
+    commands = <<-EOT
+      until [ -f ${local.marker_file_path}/userdata ]; do sleep 10; done
+      sleep 10
+      date > /home/ec2-user/COMMAND1.md
       EOT
   }
 }
