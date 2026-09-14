@@ -80,11 +80,14 @@ variable "marker_file_path" {
 ```hcl
 user_data = <<-EOT
   ...
+  ${var.additional_user_data}
+  # 마커는 항상 스크립트의 가장 마지막에 생성합니다. additional_user_data보다
+  # 먼저 touch하면 아직 kubectl/helm 설치가 돌고 있는 중에 이 마커를 기다리던
+  # SSM Association이 출발합니다 (35번 패턴).
   %{ if var.marker_file_path != null ~}
   mkdir -p ${var.marker_file_path}
   touch ${var.marker_file_path}/userdata
   %{ endif ~}
-  ${var.additional_user_data}
   EOT
 ```
 
@@ -818,3 +821,456 @@ module "pod_security_group_policy" {
 - 노드 리소스가 여러 개(예: 004번 프로젝트처럼 Fargate profile과 Karpenter가 함께 있는 경우)라면, 그 매니페스트가 스케줄되는 **구체적인 노드 리소스**를 `depends_on`에 넣습니다. 막연히 "가장 마지막에 만들어지는 모듈"을 넣지 않고, 실제로 어떤 컨트롤러/파드가 이 매니페스트를 처리하는지부터 확인합니다.
 - 이 규칙은 `eks_vpc_cni_addon`/`eks_kube_proxy_addon`/`eks_coredns_addon`을 포함한 모든 Add-on 모듈(28번 패턴)의 `aws_eks_addon` 리소스에는 적용되지 않습니다. `aws_eks_addon`은 AWS 프로바이더가 EKS API로 직접 삭제를 요청하는 리소스라 클러스터의 API 서버나 컨트롤러 파드에 별도로 접속할 필요가 없기 때문입니다. 이 규칙은 오직 **클러스터 내부의 Kubernetes API 서버로 직접 요청을 보내는** `kubectl_manifest`(및 26번 패턴이 대체하기 전의 `kubernetes_manifest`/`kubernetes_annotations` 등 `hashicorp/kubernetes` 타입드 리소스 전체)에만 적용됩니다.
 
+## 30. 보안 그룹의 `description`/`name`은 AWS 문자셋 제약을 `validation`으로 검증한다 (아포스트로피 금지, 변경 시 그룹 재생성)
+
+`aws_security_group`의 `description`과 `name`에 AWS가 허용하는 문자는 `a-zA-Z0-9`, 공백, 그리고 `. _-:/()#,@[]+=&;{}!$*` 뿐입니다. **아포스트로피(`'`)와 큰따옴표(`"`)는 허용되지 않습니다.** Terraform은 이 값을 검증하지 않고 그대로 전달하므로 `terraform validate`와 `terraform plan`을 모두 통과하고, `CreateSecurityGroup` API 호출에서야 400으로 거부됩니다.
+
+```
+Error: creating Security Group (eks-node-sg): operation error EC2: CreateSecurityGroup,
+https response error StatusCode: 400, api error InvalidParameterValue: Invalid security group
+description. Valid descriptions are strings less than 256 characters from the following set:
+a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*
+```
+
+영어 설명문을 쓰다 보면 `the cluster's managed network interfaces`처럼 소유격 아포스트로피가 자연스럽게 들어가는데, 이것이 정확히 위 오류의 원인입니다. apply 중반에 터지므로(그 시점에는 VPC/서브넷 등이 이미 만들어져 있음) 반드시 plan 단계에서 잡습니다.
+
+```hcl
+variable "description" {
+  type        = string
+  default     = "Shared security group for EKS worker nodes and the EKS-managed network interfaces"
+  description = "Description attached to the security group"
+
+  validation {
+    condition     = length(var.description) > 0
+    error_message = "description must not be empty."
+  }
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9 ._:/()#,@\\[\\]+=&;{}!$*-]{1,255}$", var.description))
+    error_message = "description must be 1-255 characters from the set AWS accepts for a security group description: a-zA-Z0-9, space, and . _-:/()#,@[]+=&;{}!$*. An apostrophe is NOT allowed - EC2 rejects the CreateSecurityGroup call with InvalidParameterValue, which otherwise only surfaces at apply time."
+  }
+}
+```
+
+`name`은 같은 문자셋 제약에 더해 `sg-`로 시작할 수 없습니다(EC2가 보안 그룹 ID용으로 예약).
+
+```hcl
+variable "name" {
+  type        = string
+  default     = "eks-node-sg"
+  description = "Name of the security group shared by the cluster managed ENIs and the worker nodes"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9 ._:/()#,@\\[\\]+=&;{}!$*-]{1,255}$", var.name)) && !startswith(var.name, "sg-")
+    error_message = "name must be 1-255 characters from the set AWS accepts for a security group name (a-zA-Z0-9, space, and . _-:/()#,@[]+=&;{}!$*, no apostrophe) and must not start with \"sg-\", which EC2 reserves for security group IDs."
+  }
+}
+```
+
+주의할 점:
+
+- **`description`과 `name`은 변경 시 보안 그룹이 재생성됩니다** (프로바이더 문서에 `Forces new resource`로 명시). AWS에 `GroupDescription`을 수정하는 API가 없기 때문입니다. 오타를 나중에 고치는 것이 그룹 교체를 의미하고, 보안 그룹은 100개 이상의 다른 리소스가 참조하는 대상이라 교체가 연쇄적으로 번거로워집니다(프로바이더 문서의 _Security Group Deletion Problem_). 그래서 다른 가변 필드보다 plan 단계 검증의 가치가 큽니다. 분류 목적의 값은 `description`이 아니라 `tags`에 넣습니다.
+- `description`에 빈 문자열(`""`)을 넣을 수 없습니다. 생략하면 프로바이더가 `Managed by Terraform`을 씁니다.
+- 같은 문자셋 제약이 **규칙의 설명**(`aws_vpc_security_group_ingress_rule`/`_egress_rule`의 `description`, 인라인 `ingress`/`egress` 블록의 `description`)에도 적용됩니다. 리터럴로 직접 쓰는 경우가 많아 변수 검증이 걸리지 않으니, 작성 시점에 아포스트로피를 넣지 않도록 주의합니다.
+- 검증 대상은 **실제로 AWS API에 전달되는 값**뿐입니다. Terraform의 `variable`/`output` 블록에 붙는 `description`(문서 문자열)은 이 제약과 무관하므로 아포스트로피를 자유롭게 씁니다. 두 가지가 같은 `description =` 문법을 공유해서 혼동하기 쉬우니, 감사 스크립트를 돌릴 때도 `aws_security_group`/`aws_vpc_security_group_*_rule` 리소스 본문 안의 값과 그 값이 참조하는 변수의 `default`만 대상으로 삼습니다.
+
+## 31. 보안 그룹 규칙은 인라인 `ingress`/`egress` 블록이 아니라 독립 규칙 리소스로 선언한다 (컨트롤러가 규칙을 추가하는 그룹에는 필수)
+
+`aws_security_group`의 인라인 `ingress`/`egress` 인자 대신 `aws_vpc_security_group_ingress_rule`/`aws_vpc_security_group_egress_rule`을 씁니다. 프로바이더 문서도 이쪽을 현재 권장 방식으로 안내합니다.
+
+이 저장소에서 결정적인 이유는 따로 있습니다. 인라인 블록은 [attributes-as-blocks](https://developer.hashicorp.com/terraform/language/attr-as-blocks) 모드로 처리되어 **그룹의 규칙 집합 전체를 단독으로 관리합니다.** 즉 Terraform이 모르는 규칙이 그룹에 생기면 다음 apply가 그것을 되돌립니다. 그런데 이 저장소의 보안 그룹 중 상당수는 AWS 쪽 컨트롤러가 규칙을 추가합니다.
+
+- AWS Load Balancer Controller: `alb.ingress.kubernetes.io/manage-backend-security-group-rules: "true"`(또는 Service 쪽 대응 애노테이션)를 주면 노드 측 규칙을 컨트롤러가 직접 넣습니다.
+- EKS: 클러스터 보안 그룹에 컨트롤 플레인-노드 간 규칙을 자체적으로 추가합니다.
+
+이런 그룹을 인라인 블록으로 정의하면 컨트롤러가 넣은 규칙이 매 apply마다 삭제되고, 로드 밸런서에서 파드로 가는 경로가 조용히 끊어집니다.
+
+```hcl
+resource "aws_security_group" "node_security_group" {
+  name        = var.name
+  description = var.description
+  vpc_id      = var.vpc_id
+  tags = {
+    Name = var.name
+  }
+}
+# Standalone rule resources rather than inline ingress/egress blocks, so the
+# AWS Load Balancer Controller can add its own backend rules to this group
+# without Terraform reverting them on the next apply (inline blocks are
+# authoritative over the whole group).
+resource "aws_vpc_security_group_ingress_rule" "node_security_group_self_ingress" {
+  security_group_id            = aws_security_group.node_security_group.id
+  description                  = "All traffic between members of this group"
+  ip_protocol                  = "-1"
+  referenced_security_group_id = aws_security_group.node_security_group.id
+}
+resource "aws_vpc_security_group_egress_rule" "node_security_group_egress" {
+  security_group_id = aws_security_group.node_security_group.id
+  description       = "All outbound"
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+```
+
+- **한 그룹에 인라인 블록과 독립 규칙 리소스를 섞지 않습니다.** 프로바이더 문서가 경고하는 대로 규칙 충돌, 영구적인 diff, 규칙 덮어쓰기가 발생합니다. 기존 모듈을 독립 리소스로 옮길 때는 인라인 블록을 남겨두지 않고 전부 이전합니다.
+- 외부에서 주입받은 소스(15번 패턴)는 규칙 블록을 복제하지 않고 `for_each`로 반복합니다(13번 패턴과 같은 이유). 단, 소스 보안 그룹 ID는 **다른 모듈의 output이라 plan 시점에 값이 unknown**이므로 `toset(list)`가 아니라 **정적 키를 가진 맵**으로 받습니다(32번 패턴).
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "node_security_group_source_ingress" {
+  for_each                     = var.ingress_source_security_groups # map(string), 키는 호출자가 정한 라벨
+  security_group_id            = aws_security_group.node_security_group.id
+  description                  = "All traffic from the ${each.key} security group"
+  ip_protocol                  = "-1"
+  referenced_security_group_id = each.value
+}
+```
+
+- 조건부 규칙은 `count`로 켜고 끕니다. 인라인에서 `dynamic "ingress"`로 하던 것을 독립 리소스에서는 `count = var.allow_inbound_from_anywhere ? 1 : 0`으로 표현합니다.
+- 반대로, **아무 컨트롤러도 손대지 않는 그룹**(예: `vscode_ec2`가 자기 인스턴스용으로만 만드는 보안 그룹)은 인라인 `dynamic "ingress"`로 두어도 실질적인 위험이 없습니다. 다만 판단이 애매하면 독립 리소스를 기본으로 선택합니다.
+- 컨트롤러나 AWS 서비스가 규칙을 추가하는 그룹에는 `revoke_rules_on_delete = true`를 설정합니다. AWS는 어떤 규칙이 그룹을 참조하는 동안 그 그룹을 삭제하지 않고, 컨트롤러가 넣은 규칙은 Terraform이 추적하지 않으므로 `terraform destroy`가 `DependencyViolation`으로 막힐 수 있습니다. 이 옵션은 그룹을 지우기 전에 **Terraform이 만들지 않은 규칙까지 포함해** 붙어 있는 규칙을 먼저 회수합니다. Terraform 쪽 삭제 동작만 바꾸는 플래그이므로 그룹을 재생성시키지 않습니다(30번 패턴의 `description`/`name`과 달리 `Forces new resource`가 아님).
+
+```hcl
+resource "aws_security_group" "node_security_group" {
+  name        = var.name
+  description = var.description
+  vpc_id      = var.vpc_id
+
+  # The controllers listed above add rules to this group that Terraform does not
+  # track. AWS refuses to delete a group while rules referencing it remain, and
+  # a controller-added rule can reference the group being deleted (or form a
+  # cycle with another group), which blocks the destroy. This revokes the
+  # group's attached rules first, including the ones Terraform did not create
+  # (rules.md #31).
+  revoke_rules_on_delete = var.revoke_rules_on_delete
+
+  tags = {
+    Name = var.name
+  }
+}
+```
+
+이 저장소에서는 `node_security_group`(AWS Load Balancer Controller의 backend 규칙 + EKS의 컨트롤 플레인-노드 규칙)과 `load_balancer_security_group`(AWS Load Balancer Controller)에 적용되어 있습니다. 반대로 아무도 규칙을 추가하지 않는 그룹(`vscode_ec2`의 자체 그룹)에는 불필요합니다.
+
+## 32. 다른 모듈의 output(리소스 ID)을 `for_each`로 반복할 때는 `toset(list)`가 아니라 정적 키를 가진 `map(string)`으로 받는다
+
+`for_each`의 **키**는 `plan` 단계에서 결정되어야 합니다. 리소스 주소(`resource["key"]`)를 만드는 값이기 때문입니다. `toset(var.ids)`로 집합을 만들면 **값이 곧 키**가 되는데, 그 값이 아직 만들어지지 않은 리소스의 속성(예: `module.vscode_ec2.security_group_id`)이라면 plan 시점에 unknown이므로 다음 에러로 실패합니다. 원소 **개수**를 아는 것만으로는 부족합니다.
+
+```
+Error: Invalid for_each argument
+
+  on modules\load_balancer_security_group\main.tf line 40, in resource "aws_vpc_security_group_ingress_rule" "load_balancer_source_group_ingress":
+  40:   for_each                     = toset(var.ingress_source_security_group_ids)
+    ├────────────────
+    │ var.ingress_source_security_group_ids is list of string with 1 element
+
+The "for_each" set includes values derived from resource attributes that cannot be
+determined until apply, and so Terraform cannot determine the full set of keys that
+will identify the instances of this resource.
+```
+
+15번 패턴(모듈에 필요한 외부 리소스는 ID/이름 목록으로만 주입)으로 받은 값을 그대로 `toset()`에 넣으면 거의 항상 이 상황이 됩니다. 그 값의 출처가 **다른 모듈의 output = 아직 생성되지 않은 리소스의 속성**이기 때문입니다. 따라서 모듈은 `list(string)`이 아니라 **호출자가 정한 라벨을 키로 하는 `map(string)`**으로 받고, `toset()` 없이 맵을 그대로 `for_each`에 넣습니다. 에러 메시지가 안내하는 "키는 설정에 정적으로 정의하고 값에만 apply 시점 결과를 담는다"가 바로 이 형태입니다.
+
+```hcl
+# 모듈 variables.tf
+variable "ingress_source_security_groups" {
+  type        = map(string)
+  default     = {}
+  description = "Security group IDs allowed inbound on port, keyed by a caller-chosen label ... A map rather than a list because these IDs are usually another module's output, unknown until apply, and for_each needs statically known keys"
+
+  validation {
+    condition     = alltrue([for label in keys(var.ingress_source_security_groups) : can(regex("^[a-zA-Z0-9._-]+$", label))])
+    error_message = "ingress_source_security_groups keys are labels used in the rule descriptions and resource addresses, so each must be a non-empty string of letters, digits, dots, underscores or hyphens."
+  }
+  validation {
+    condition     = alltrue([for id in values(var.ingress_source_security_groups) : can(regex("^sg-[0-9a-f]+$", id))])
+    error_message = "ingress_source_security_groups must contain valid security group IDs (e.g. sg-0123456789abcdef0)."
+  }
+}
+```
+
+```hcl
+# 모듈 main.tf
+resource "aws_vpc_security_group_ingress_rule" "load_balancer_source_group_ingress" {
+  for_each                     = var.ingress_source_security_groups
+  security_group_id            = aws_security_group.load_balancer_security_group.id
+  description                  = "Listener port from the ${each.key} security group"
+  ip_protocol                  = "tcp"
+  from_port                    = var.port
+  to_port                      = var.port
+  referenced_security_group_id = each.value
+}
+```
+
+```hcl
+# 루트 main.tf
+module "alb_security_group" {
+  source = "./modules/load_balancer_security_group"
+
+  ingress_source_security_groups = {
+    vscode_ec2 = module.vscode_ec2.security_group_id
+  }
+}
+```
+
+- 키는 반드시 **리터럴 문자열**이어야 합니다. `{ (module.vscode_ec2.security_group_id) = ... }`처럼 unknown 값을 키로 쓰면 아무것도 해결되지 않습니다.
+- 검증은 `keys()`/`values()`로 나눠서 씁니다. 값(ID)이 unknown인 동안 Terraform은 그 `validation`을 apply까지 미루지만, 키 검증은 plan 단계에서 즉시 동작합니다.
+- `each.key`를 보안 그룹 규칙의 `description`에 넣으면 규칙마다 출처가 드러나 plan을 읽기 쉬워집니다. 대신 키가 30번 패턴의 문자셋 제약(아포스트로피 금지)을 위반하지 않도록 위 `validation`으로 라벨 문자셋을 제한합니다.
+- 반대로 **값이 설정 파일에만 있는 정적 리스트**(예: `ingress_cidr_blocks`, 13번 패턴의 `node_iam_policy_arns` 같은 관리형 정책 ARN 목록)는 plan 시점에 이미 알려져 있으므로 `toset(list)`을 그대로 씁니다. 이 패턴은 "리스트를 전부 맵으로 바꾼다"는 뜻이 아니라, **값의 출처가 다른 리소스/모듈이면 맵으로 받는다**는 뜻입니다.
+- `-target`으로 두 번 나눠 apply하는 것은 에러 메시지가 제시하는 우회책일 뿐입니다. 이 저장소는 단일 `terraform apply`로 전체가 만들어져야 하므로(26번 패턴과 같은 이유) 설정 자체를 맵으로 고칩니다.
+- 같은 제약이 `dynamic` 블록의 `for_each`(예: 인라인 `dynamic "ingress"`)에도 적용됩니다. 인라인 블록을 유지하는 그룹(31번 패턴의 예외)에서도 소스 ID 목록은 동일하게 맵으로 받습니다.
+
+## 33. `helm_release`의 `set`은 값의 타입을 추론한다 — 문자열이어야 하는 값(annotation/label)에는 `type = "string"`을 entry별로 지정
+
+`helm_release`의 `set`은 `helm --set`과 동일하게 값의 타입을 추론합니다. 따라서 HCL에서 `value = "false"`로 문자열을 넘겨도 차트에는 **YAML boolean**으로 도착합니다. Kubernetes의 `annotations`/`labels`는 값이 반드시 문자열이어야 하므로, 렌더링 결과가 따옴표 없는 `safe-to-evict: false`가 되어 API 디코딩에서 실패합니다.
+
+```
+* Deployment in version "v1" cannot be handled as a Deployment: json: cannot unmarshal
+  bool into Go struct field ObjectMeta.spec.template.metadata.annotations of type string
+```
+
+해당 entry에만 `type = "string"`을 지정합니다(`--set-string`과 같은 의미). `set`의 `type`은 `"auto"`(생략 시 기본) 또는 `"string"`만 받습니다.
+
+```hcl
+set = concat([
+  {
+    name  = "rbac.serviceAccount.create"
+    value = "true" # 차트가 boolean을 기대하므로 auto로 둔다
+  },
+  {
+    name  = "podAnnotations.cluster-autoscaler\\.kubernetes\\.io/safe-to-evict"
+    value = "false"
+    type  = "string" # annotation 값은 문자열이어야 한다
+  },
+  ],
+  var.additional_set_values,
+)
+```
+
+- **릴리스 전체를 문자열로 강제하지 않고 entry별로 지정합니다.** 같은 릴리스 안에서 `rbac.serviceAccount.create`(boolean), `replicaCount`(number)는 추론된 타입이 맞는 값입니다. 일괄 `--set-string`은 이쪽을 깨뜨립니다.
+- `set` 목록을 확장하는 변수(`additional_set_values`)의 object 타입에도 `type = optional(string)`을 넣고 `auto`/`string`만 허용하도록 검증합니다. 그렇지 않으면 호출자는 문자열이 필요한 값을 넘길 방법이 없습니다.
+- 판단이 애매하면 apply 전에 `helm template`으로 렌더링해서 확인합니다. 값이 따옴표 없이 나오면 그 값은 문자열이 아닙니다.
+
+```bash
+helm template cluster-autoscaler autoscaler/cluster-autoscaler --version 9.51.0 -n kube-system \
+  --set 'podAnnotations.cluster-autoscaler\.kubernetes\.io/safe-to-evict=false'
+#   annotations:
+#     cluster-autoscaler.kubernetes.io/safe-to-evict: false     # 실패
+# --set-string 이면
+#     cluster-autoscaler.kubernetes.io/safe-to-evict: "false"   # 정상
+```
+
+- `extraArgs`처럼 차트가 값을 `toString`으로 감싸 렌더링하는 경우는 auto여도 결과가 같습니다. 다만 차트 템플릿이 `{{ if $value }}`로 분기하면 boolean `false`가 플래그 자체를 누락시켜 **의미가 반대로 뒤집힐** 수 있으니, bool 값을 넘길 때는 렌더 결과를 확인합니다.
+
+### 실패한 릴리스가 남아 다음 apply가 막히는 경우
+
+`helm install`이 실패하면 릴리스는 클러스터에 `failed` 상태로 남지만 Terraform state에는 기록되지 않습니다. 그 상태로 다시 apply하면 **첫 실패의 원인이 아닌** 다음 에러가 뜹니다.
+
+```
+Error: installation failed
+  with module.cluster_autoscaler.helm_release.cluster_autoscaler,
+  ...
+cannot re-use a name that is still in use
+```
+
+이 메시지는 증상일 뿐이고 진짜 원인은 릴리스 히스토리에 있습니다. 먼저 원인을 확인한 뒤 정리합니다.
+
+```bash
+helm history cluster-autoscaler -n kube-system            # STATUS=failed, DESCRIPTION에 실제 원인
+helm uninstall cluster-autoscaler -n kube-system          # 설정을 고친 뒤 이름을 비우고
+terraform apply
+```
+
+- **`terraform import`로 가져오지 않습니다.** 실패한 릴리스를 state에 넣으면 이후 apply가 upgrade로 진행되면서 `has no deployed releases`로 다시 막힙니다. 정상 배포된 적 없는 릴리스는 지우고 새로 설치하는 것이 맞습니다.
+- `atomic = true`(또는 `replace = true`)를 켜면 실패한 릴리스가 자동으로 정리되어 이 상태에 빠지지 않지만, 원인 진단에 필요한 릴리스 히스토리도 함께 사라집니다. 이 저장소는 학습/데모 목적이라 실패 흔적을 남기는 쪽을 택하고 위 수동 복구 절차를 따릅니다.
+- `helm uninstall`은 실패한 리비전이 이미 만들어둔 리소스(ServiceAccount, RBAC, Service 등)까지 지웁니다. **정상 배포된 릴리스에는 쓰지 않습니다** — 이 절차는 `helm history`의 STATUS가 `failed`이고 성공한 리비전이 하나도 없을 때에 한정합니다.
+
+## 34. EKS 클러스터와 `vscode_ec2`가 같은 루트 모듈에 함께 선언되면 code-server, kubectl, eksctl, helm, docker를 **모두** 설치한다
+
+한 디렉토리(루트 모듈)에 EKS 클러스터(`module "eks_cluster"` 또는 `aws_eks_cluster`)와 `module "vscode_ec2"`가 함께 있으면, 그 인스턴스는 클러스터를 다루는 작업대입니다. 다섯 가지가 하나도 빠짐없이 설치되어 있어야 합니다.
+
+| 도구 | 설치 주체 | 왜 필요한가 |
+| --- | --- | --- |
+| code-server | `vscode_ec2` 모듈 | 이 인스턴스의 존재 이유. 브라우저에서 `/home/ec2-user`를 연다 |
+| kubectl | 루트의 `additional_user_data` | 클러스터 상태 조사 (`get`/`describe`/`logs`) |
+| eksctl | 루트의 `additional_user_data` | 클러스터·노드그룹·IRSA를 CLI로 조회/임시 조작 |
+| helm | 루트의 `additional_user_data` | 릴리스 진단 (`helm list`, `helm history` — 33번 패턴의 원인 규명이 이 명령으로 이뤄진다) |
+| docker | 루트의 `additional_user_data` | 이미지 빌드/ECR 푸시처럼 **데몬이 반드시 필요해서** 프로바이더 리소스로 대체할 수 없는 작업 |
+
+- code-server만 모듈이 책임지고 나머지 네 개는 루트가 `additional_user_data`로 주입합니다. 모듈은 자기 루트에 EKS 클러스터가 있는지 몰라도 되어야 하고(4번 패턴), 클러스터가 없는 프로젝트에서는 이 네 개를 설치하지 않아 부팅이 빨라집니다.
+- **18번 패턴과의 경계**: 이 도구들은 사람이 조사·디버깅·데모하는 용도입니다. 설치되어 있다는 이유로 userdata나 `aws_ssm_association`에서 `kubectl apply`/`helm install`로 **리소스를 만들지 않습니다**. 리소스 생성은 계속 `helm_release`/`kubectl_manifest`가 담당합니다.
+- 클러스터가 같은 루트에 있으면 `aws eks update-kubeconfig`까지 userdata에서 끝내고, 그 인스턴스 역할에 클러스터 접근 권한을 주는 `aws_eks_access_entry`를 루트에 선언합니다(14번 패턴). 이것이 없으면 kubectl이 설치돼도 `error: You must be logged in to the server`로 아무것도 못 합니다.
+
+```hcl
+# 루트 main.tf
+module "vscode_ec2" {
+  source = "./modules/vscode_ec2"
+
+  marker_file_path = var.marker_file_path
+  # ec2-user로 실행합니다. root로 설치하면 도구와 kubeconfig가 /root에 들어가고,
+  # code-server 세션(ec2-user)에서는 보이지 않습니다.
+  #
+  # HOME을 명시하는 이유: userdata는 root로 실행되고 sudo -E는 환경을 보존하므로
+  # "~"가 /root를 가리킬 수 있습니다. 그러면 ec2-user 권한으로 /root에 쓰려다
+  # Permission denied로 실패합니다. sudoers 설정에 의존하지 않게 못박습니다.
+  additional_user_data = <<-EOT
+    dnf install -yq docker
+    systemctl enable --now docker
+    usermod -aG docker ec2-user
+    # code-server는 usermod 이전에 이미 떠 있어서 docker 그룹을 갖고 있지 않습니다.
+    # 재시작해야 IDE 터미널에서 docker 소켓에 접근할 수 있습니다.
+    # (/var/run/docker.sock을 666으로 여는 방식은 쓰지 않습니다.)
+    systemctl restart code-server
+
+    sudo -Eu ec2-user bash << 'EOF'
+    export HOME=/home/ec2-user
+    cd /home/ec2-user
+    mkdir -p /home/ec2-user/bin
+    curl -sO https://s3.us-west-2.amazonaws.com/amazon-eks/${var.kubectl_download_version}/bin/linux/amd64/kubectl
+    chmod +x kubectl && mv kubectl /home/ec2-user/bin/kubectl
+    export PATH=/home/ec2-user/bin:$PATH
+    echo 'export PATH=/home/ec2-user/bin:$PATH' >> ~/.bashrc
+    # 순서 주의: completion을 먼저 source해야 __start_kubectl이 정의됩니다.
+    # complete를 먼저 쓰면 로그인마다 "function not found" 오류가 납니다.
+    echo 'source /usr/share/bash-completion/bash_completion' >> ~/.bashrc
+    echo 'source <(kubectl completion bash)' >> ~/.bashrc
+    echo 'alias k=kubectl' >> ~/.bashrc
+    echo 'complete -o default -F __start_kubectl k' >> ~/.bashrc
+    PLATFORM=$(uname -s)_amd64
+    curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+    tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+    sudo install -m 0755 /tmp/eksctl /usr/local/bin && rm /tmp/eksctl
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh && ./get_helm.sh
+    aws eks update-kubeconfig --region ${data.aws_region.current.region} --name ${module.eks_cluster.cluster_name}
+    EOF
+  EOT
+
+  depends_on = [module.network]
+}
+```
+
+- kubectl 버전은 리터럴로 박지 않고 `var.kubectl_download_version`(예: `1.33.3/2025-08-03`)로 받아 클러스터의 `kubernetes_version`과 함께 올립니다(7번 패턴). 서버와 ±1 마이너를 벗어나면 지원 스큐를 벗어납니다.
+- eksctl은 `eksctl-io/eksctl`을 씁니다. 예전 `weaveworks/eksctl` URL도 리다이렉트로 동작하지만 정식 이름을 씁니다.
+- `set -x`가 켜진 userdata에서는 모든 명령이 `/var/log/cloud-init-output.log`에 남습니다. 설치가 안 됐을 때 가장 먼저 볼 곳이며, 여기에 비밀값을 흘리는 명령을 넣지 않습니다.
+
+## 35. 루트 `outputs.tf`의 모든 값은 SSM Association으로 `vscode_ec2`의 `README.md`에도 기록한다 (마커 파일로 순서 강제)
+
+실제 작업은 code-server 브라우저 세션 안에서 일어나고, 그 안에는 `terraform output`이 없습니다. 그래서 **루트 `outputs.tf`가 노출하는 output 전부가 인스턴스의 `/home/ec2-user/README.md`에도 있어야 합니다.** code-server가 `/home/ec2-user`를 열기 때문에 파일 탐색기 첫 화면에 보입니다.
+
+**중요한 것은 "일부"가 아니라 "전부"라는 점입니다.** output이 12개면 README 섹션도 12개입니다. 어떤 값이 중요해 보이는지로 골라 담지 않습니다. 인스턴스에 접속한 사람은 `terraform output`을 볼 수 없으므로, README에서 빠진 output은 그 사람에게는 존재하지 않는 정보입니다.
+
+이걸 사람의 기억에 맡기지 않으려면 구조를 뒤집어야 합니다. **모든 output의 값을 루트 `locals`의 맵 한 곳에서 정의하고, `outputs.tf`의 `output` 블록은 그 맵을 그대로 투영하기만 합니다.** 이렇게 하면 참조할 맵 항목 없이는 output을 선언할 수 없으므로, "output은 있는데 README에는 없는" 상태가 애초에 만들어지지 않습니다.
+
+작성은 `aws_ssm_association`(`AWS-RunShellScript`)으로 하고, 순서는 마커 파일로 강제합니다(6번 패턴).
+
+```hcl
+# 루트 main.tf
+locals {
+  # 이 프로젝트가 노출하는 모든 output의 정의. outputs.tf의 output 블록과 README가
+  # 똑같이 여기만 참조하므로, 값 표현식이 저장소에 단 한 번만 존재합니다
+  # (5번 패턴). 맵의 키가 곧 output 이름입니다.
+  #
+  # output을 추가할 때는 반드시 여기에 항목을 먼저 추가합니다. 여기 없는 output은
+  # outputs.tf에서 참조할 것이 없어 선언 자체가 불가능하므로, README에서 누락되는
+  # 경우가 구조적으로 생기지 않습니다.
+  outputs = {
+    vscode_url = {
+      order       = 1
+      title       = "VS Code URL"
+      description = "URL of the code-server web UI on the VS Code EC2 instance"
+      value       = module.vscode_ec2.vscode_url
+    }
+    cluster_name = {
+      order       = 2
+      title       = "EKS cluster name"
+      description = "Name of the EKS cluster"
+      value       = module.eks_cluster.cluster_name
+    }
+    cluster_endpoint = {
+      order       = 3
+      title       = "EKS cluster endpoint"
+      description = "API server endpoint of the EKS cluster"
+      value       = module.eks_cluster.cluster_endpoint
+    }
+    update_kubeconfig_command = {
+      order       = 4
+      title       = "Update kubeconfig"
+      description = "Command that points kubectl on this instance at the cluster"
+      value       = "aws eks update-kubeconfig --region ${data.aws_region.current.region} --name ${module.eks_cluster.cluster_name}"
+    }
+  }
+  # 맵을 그대로 순회하면 섹션이 키의 사전순으로 나옵니다. 결정적이긴 하지만
+  # 읽는 순서와는 무관해서, "1. 스케일 업"보다 "2. 노드 확인"이 위에 올 수
+  # 있습니다. order 필드로 다시 키를 만들고 values()를 取하면(values는 맵의 값을
+  # 키 순서로 돌려줍니다) 의도한 순서가 되고, 순서는 여전히 설정만으로 결정됩니다.
+  readme_ordered = values({
+    for key, entry in local.outputs : format("%02d-%s", entry.order, key) => entry
+  })
+  # 맵을 순회해 본문을 만들기 때문에, 항목을 추가하면 README에 자동으로 반영됩니다.
+  readme_body = join("\n", concat(
+    ["# ${var.cluster_name}", ""],
+    flatten([for entry in local.readme_ordered : [
+      "## ${entry.title}", "", entry.description, "", "```", entry.value, "```", "",
+    ]]),
+  ))
+}
+
+resource "aws_ssm_association" "vscode_readme" {
+  name                             = "AWS-RunShellScript"
+  wait_for_success_timeout_seconds = var.readme_timeout_seconds
+  targets {
+    key    = "InstanceIds"
+    values = [module.vscode_ec2.instance_id]
+  }
+  parameters = {
+    commands = <<-EOT
+      until [ -f ${module.vscode_ec2.marker_file_path}/userdata ]; do sleep 10; done
+      cat > /home/ec2-user/README.md << 'TFREADME'
+      ${local.readme_body}
+      TFREADME
+      chown ec2-user:ec2-user /home/ec2-user/README.md
+      touch ${module.vscode_ec2.marker_file_path}/vscode_readme
+      EOT
+  }
+}
+```
+
+```hcl
+# 루트 outputs.tf - 값은 전부 local.outputs의 투영입니다. 여기서 새 표현식을
+# 만들지 않습니다.
+#
+# description만은 맵을 참조할 수 없습니다. Terraform은 output의 description에
+# 표현식을 허용하지 않아서 "Error: Variables not allowed - Variables may not be
+# used here"로 거부합니다. 그래서 설명 문구는 맵과 output 블록 양쪽에 리터럴로
+# 존재하는 유일한 항목입니다 (값은 여전히 한 곳에만 있습니다).
+output "vscode_url" {
+  value       = local.outputs.vscode_url.value
+  description = "URL of the code-server web UI on the VS Code EC2 instance"
+}
+output "cluster_name" {
+  value       = local.outputs.cluster_name.value
+  description = "Name of the EKS cluster"
+}
+output "cluster_endpoint" {
+  value       = local.outputs.cluster_endpoint.value
+  description = "API server endpoint of the EKS cluster"
+}
+output "update_kubeconfig_command" {
+  value       = local.outputs.update_kubeconfig_command.value
+  description = "Command that points kubectl on this instance at the cluster"
+}
+```
+
+- **`outputs.tf`에 값 표현식을 직접 쓰는 `output`을 만들지 않습니다.** `value = module.eks_cluster.cluster_name`처럼 맵을 거치지 않고 선언한 output은 README에서 빠지고, 그 누락은 apply가 성공하기 때문에 아무도 알려주지 않습니다. 모든 `value`가 `local.outputs.<키>.value`인지가 이 패턴이 지켜지고 있는지 판별하는 기준입니다.
+- 리뷰할 때는 개수를 셉니다. `outputs.tf`의 `output` 블록 수와 `local.outputs`의 항목 수가 다르면 둘 중 하나가 누락된 것입니다. 값이 아직 unknown이어도 키는 plan 이전에 알 수 있으므로 `echo '[for k, v in local.outputs : k]' | terraform console`로 목록을 뽑아 대조할 수 있습니다.
+- 각 항목에 `order`를 붙이고 `values(...)`로 정렬합니다. README는 사람이 위에서 아래로 읽는 문서이고 데모 명령에는 실행 순서가 있는데, 맵을 그대로 순회하면 키의 사전순이 되어 그 순서가 깨집니다.
+- **`aws_ssm_association`은 루트에 둡니다.** 여러 모듈의 output을 조합하는 책임은 루트의 것이고(14번 패턴), `vscode_ec2` 모듈은 자기 홈에 무엇이 적히는지 몰라도 됩니다.
+- 마커 경로는 모듈 input을 그대로 output으로 되돌려받은 `module.vscode_ec2.marker_file_path`를 참조합니다(5번 패턴). 루트에서 `var.marker_file_path`를 직접 다시 쓰지 않습니다.
+- 대기 조건은 `depends_on`이나 `wait_for_success_timeout_seconds`가 아니라 `until [ -f .../userdata ]` 루프입니다(6번 패턴). 그리고 이 association도 자신의 마커(`vscode_readme`)를 남겨서, 뒤에 오는 association이 이어서 기다릴 수 있게 합니다.
+- **userdata의 마커는 스크립트 맨 마지막에 생성되어야 합니다.** `${var.additional_user_data}`보다 먼저 `touch`하면 kubectl/eksctl/helm 설치 도중에 이 association이 출발해서, README는 써지지만 도구는 아직 없는 상태가 됩니다(4번 패턴의 스니펫 참고).
+- SSM 명령은 root로 실행되므로 `chown ec2-user:ec2-user`가 필요합니다. 없으면 code-server에서 편집이 안 됩니다.
+- 셸 heredoc 구분자는 `<< 'TFREADME'`처럼 인용합니다. 값은 Terraform이 이미 채워 넣었으므로 셸이 `$`나 백틱을 건드릴 이유가 없습니다. 구분자는 본문에 나올 수 없는 문자열로 정합니다. README에 kubectl 명령이나 마크다운이 들어가는 만큼 `EOF`/`MD` 같은 짧은 단어보다 안전합니다.
+- `parameters`가 바뀌면 association이 갱신되며 다시 실행되고, `cat >`는 덮어쓰기이므로 output이 바뀌면 다음 apply에서 README도 따라 갱신됩니다. 맵 하나만 고치면 output과 README가 같이 따라옵니다.
+- **apply 시점에 Terraform이 모르는 값**(예: AWS Load Balancer Controller가 만드는 로드밸런서의 DNS 이름)은 그 항목을 빼는 게 아니라, 값 자리에 **확인 명령**을 넣습니다: `kubectl -n <ns> get service <name>`. output과 README가 같은 맵을 보므로 양쪽에 동일하게 그 명령이 나갑니다.
+- **`sensitive = true`가 필요한 값은 예외입니다.** 비밀번호·토큰 같은 값을 README로 디스크에 남기면 인증 없이 열리는 code-server를 통해 그대로 노출됩니다. 이런 항목은 맵의 `value`에 값 대신 조회 방법(`aws secretsmanager get-secret-value --secret-id ...`)을 넣고, 실제 값이 필요한 output은 별도로 `sensitive = true`로 선언합니다. 이때만 output과 README가 서로 다른 것을 담습니다.
+- 이 패턴은 인스턴스에 `AmazonSSMManagedInstanceCore`가 붙어 있어야 동작합니다(`vscode_ec2` 모듈의 `iam_policy_arns` 기본값에 포함).
