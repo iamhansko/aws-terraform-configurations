@@ -27,6 +27,8 @@ module "vscode_ec2" {
   additional_user_data = <<-EOT
     date > /home/ec2-user/COMMAND0.md
   EOT
+
+  depends_on = [module.network]
 }
 
 resource "aws_ssm_association" "vscode_association_1" {
