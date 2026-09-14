@@ -5,16 +5,16 @@ data "aws_ssm_parameter" "amazon_linux2023_ami_id" {
 }
 
 module "network" {
-  source = "../modules/network"
+  source = "./modules/network"
 }
 
 module "key_pair" {
-  source   = "../modules/key_pair"
+  source   = "./modules/key_pair"
   key_name = var.key_pair_name
 }
 
 module "vscode_ec2" {
-  source = "../modules/vscode_ec2"
+  source = "./modules/vscode_ec2"
 
   name          = var.vscode_instance_name
   instance_type = var.vscode_instance_type

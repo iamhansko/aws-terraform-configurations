@@ -1,9 +1,6 @@
 data "aws_region" "current" {}
 
 locals {
-  # Always carve out /24 subnets regardless of the VPC's own prefix length,
-  # matching the previous element(range()) construction without the
-  # throwaway list indirection.
   subnet_newbits = 24 - tonumber(split("/", var.vpc_cidr_block)[1])
 }
 
