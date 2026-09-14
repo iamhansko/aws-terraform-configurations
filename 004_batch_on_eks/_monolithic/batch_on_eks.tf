@@ -394,7 +394,7 @@ resource "aws_eks_cluster" "eks_cluster" {
     support_type = "STANDARD"
   }
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
-  name = "${var.prefix}-eks-cluster"
+  name                      = "${var.prefix}-eks-cluster"
 }
 resource "aws_iam_role" "eks_cluster_iam_role" {
   assume_role_policy = jsonencode({
@@ -433,7 +433,6 @@ resource "aws_eks_fargate_profile" "kubesystem_fargate_profile" {
   selector {
     namespace = "kube-system"
   }
-  # CloudFormation generated this name automatically; Terraform requires it, so it is derived from the stack name.
   fargate_profile_name = "${var.prefix}-kubesystem-fargate-profile"
 }
 
