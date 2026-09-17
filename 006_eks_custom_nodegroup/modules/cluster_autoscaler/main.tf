@@ -4,13 +4,13 @@
 #   sed -i "s/<YOUR CLUSTER NAME>/.../g" ...
 #   kubectl apply -f cluster-autoscaler-autodiscover.yaml
 #   kubectl -n kube-system set image deployment.apps/cluster-autoscaler ...
-# from a shell on the bastion (rules.md #18). That sequence resolved the
+# from a shell on the bastion (rules.md E-1). That sequence resolved the
 # autoscaler image tag at boot time by scraping the GitHub releases API, so two
 # applies a month apart silently produced different versions; the chart version
 # is pinned here instead.
 #
 # IAM role and Helm release in one module, since helm_release references the
-# role ARN and neither half stands alone (rules.md #21).
+# role ARN and neither half stands alone (rules.md C-2).
 resource "aws_iam_role" "cluster_autoscaler_iam_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -115,7 +115,7 @@ resource "helm_release" "cluster_autoscaler" {
     # handled as a Deployment: json: cannot unmarshal bool into Go struct field
     # ObjectMeta.spec.template.metadata.annotations of type string". Typed per
     # entry rather than release-wide, because rbac.serviceAccount.create above
-    # does have to arrive as a boolean (rules.md #33).
+    # does have to arrive as a boolean (rules.md E-7).
     {
       name  = "podAnnotations.cluster-autoscaler\\.kubernetes\\.io/safe-to-evict"
       value = "false"
@@ -139,6 +139,6 @@ resource "helm_release" "cluster_autoscaler" {
 
   # The role must already carry its inline policy before the autoscaler starts
   # calling Auto Scaling, and referencing the ARN alone doesn't order this
-  # release after the policy (rules.md #12).
+  # release after the policy (rules.md D-1).
   depends_on = [aws_iam_role_policy.cluster_autoscaler_iam_role]
 }

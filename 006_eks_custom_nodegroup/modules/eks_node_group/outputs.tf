@@ -20,5 +20,5 @@ output "launch_template_id" {
 }
 output "labels" {
   value       = var.labels
-  description = "Kubernetes labels applied to this node group's nodes, re-exposed so callers scheduling pods onto it reference one source of truth (rules.md #5)"
+  description = "Kubernetes labels applied to this node group's nodes, re-exposed so callers scheduling pods onto it reference one source of truth (rules.md B-5)"
 }

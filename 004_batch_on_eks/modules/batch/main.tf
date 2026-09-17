@@ -47,7 +47,7 @@ locals {
 # ("The caller is not allowed to modify access entries with a principalArn
 # value of a Service Linked Role"), so AWSServiceRoleForBatch cannot be
 # granted access the way modules/vscode_ec2 and modules/karpenter's node
-# role are (rules.md #20 does not apply here). It must instead be mapped
+# role are (rules.md E-6 does not apply here). It must instead be mapped
 # through the aws-auth ConfigMap, which this cluster's
 # authentication_mode = "API_AND_CONFIG_MAP" still supports alongside
 # access entries.
@@ -80,7 +80,7 @@ resource "kubectl_manifest" "batch_service_aws_auth_mapping" {
 # Kubernetes RBAC objects are declared as raw manifests via the alekc/kubectl
 # provider (kubectl_manifest) instead of the hashicorp/kubernetes typed
 # resources, so the whole root module (EKS cluster + these RBAC objects) can
-# be applied in a single `terraform apply` (rules.md #26). yamlencode()
+# be applied in a single `terraform apply` (rules.md E-2). yamlencode()
 # converts the HCL object below into the manifest's exact camelCase
 # Kubernetes API field names (apiGroups, roleRef, apiGroup, ...).
 resource "kubectl_manifest" "batch_namespace" {
@@ -134,7 +134,7 @@ resource "kubectl_manifest" "aws_batch_cluster_role_binding" {
 
   # roleRef.name above is a literal string, not an attribute reference, so
   # Terraform's graph would not otherwise know the ClusterRole must exist
-  # first (rules.md #12's reasoning, applied to a naming rather than an ARN
+  # first (rules.md D-1's reasoning, applied to a naming rather than an ARN
   # reference).
   depends_on = [kubectl_manifest.aws_batch_cluster_role]
 }

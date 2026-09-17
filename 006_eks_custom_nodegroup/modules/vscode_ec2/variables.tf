@@ -133,7 +133,7 @@ variable "iam_policy_arns" {
 variable "extra_security_group_ids" {
   type        = list(string)
   default     = []
-  description = "Additional security group IDs attached to the instance (e.g. an EKS cluster security group, to allow API server access). The module never looks these resources up itself (rules.md #15)"
+  description = "Additional security group IDs attached to the instance (e.g. an EKS cluster security group, to allow API server access). The module never looks these resources up itself (rules.md B-6)"
 
   validation {
     condition     = alltrue([for id in var.extra_security_group_ids : can(regex("^sg-[0-9a-f]+$", id))])

@@ -20,7 +20,7 @@ output "drift_status" {
 }
 output "governed_regions" {
   value       = var.governed_regions
-  description = "Regions the landing zone governs, re-exposed so a Region deny control's AllowedRegions parameter references one source of truth instead of restating the list (rules.md #5)"
+  description = "Regions the landing zone governs, re-exposed so a Region deny control's AllowedRegions parameter references one source of truth instead of restating the list (rules.md B-5)"
 }
 output "manifest" {
   value       = local.manifest

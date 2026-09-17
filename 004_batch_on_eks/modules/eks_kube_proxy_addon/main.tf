@@ -2,7 +2,7 @@
 # trivially "complete" (desired == ready == 0), so unlike coredns
 # (modules/eks_coredns_addon) it doesn't need compute capacity to become
 # ACTIVE. It only needs the cluster to exist, which the cluster_name
-# reference below already orders this module after (rules.md #28). Split
+# reference below already orders this module after (rules.md C-4). Split
 # into its own module (rather than sharing one with vpc-cni) so each
 # EKS-managed addon can be independently versioned/upgraded/replaced
 # without affecting the others.

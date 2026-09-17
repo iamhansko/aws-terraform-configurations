@@ -121,7 +121,7 @@ variable "additional_set_values" {
     type  = optional(string)
   }))
   default     = []
-  description = "Extra Helm values appended to the release's set list, for chart settings this module does not expose as named variables. Set type = \"string\" on an entry whose value must stay a string, e.g. an annotation or label value of \"true\"/\"false\"/\"1\", which Helm would otherwise infer as a boolean or number and fail to decode (rules.md #33). Left unset, the entry keeps Helm's type inference"
+  description = "Extra Helm values appended to the release's set list, for chart settings this module does not expose as named variables. Set type = \"string\" on an entry whose value must stay a string, e.g. an annotation or label value of \"true\"/\"false\"/\"1\", which Helm would otherwise infer as a boolean or number and fail to decode (rules.md E-7). Left unset, the entry keeps Helm's type inference"
 
   validation {
     condition     = alltrue([for entry in var.additional_set_values : length(entry.name) > 0])

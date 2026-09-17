@@ -63,7 +63,7 @@ variable "ingress_cidr_blocks" {
 variable "ingress_source_security_groups" {
   type        = map(string)
   default     = {}
-  description = "Security group IDs allowed inbound on port, keyed by a caller-chosen label, e.g. { vscode_ec2 = module.vscode_ec2.security_group_id } so an internal load balancer is reachable from the bastion and nowhere else. The module is handed IDs and never looks the sources up itself (rules.md #15). A map rather than a list because these IDs are usually another module's output, unknown until apply, and for_each needs statically known keys (rules.md #32)"
+  description = "Security group IDs allowed inbound on port, keyed by a caller-chosen label, e.g. { vscode_ec2 = module.vscode_ec2.security_group_id } so an internal load balancer is reachable from the bastion and nowhere else. The module is handed IDs and never looks the sources up itself (rules.md B-6). A map rather than a list because these IDs are usually another module's output, unknown until apply, and for_each needs statically known keys (rules.md B-8)"
 
   validation {
     condition     = alltrue([for label in keys(var.ingress_source_security_groups) : can(regex("^[a-zA-Z0-9._-]+$", label))])

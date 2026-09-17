@@ -124,7 +124,7 @@ variable "vpc_security_group_ids" {
 variable "custom_ami_id" {
   type        = string
   default     = null
-  description = "Optional AMI ID set as the launch template's image_id, replacing the EKS-optimized AMI that ami_type would select. When set, custom_user_data must carry the MIME multipart NodeConfig that bootstraps the node, because EKS no longer injects it (rules.md #4)"
+  description = "Optional AMI ID set as the launch template's image_id, replacing the EKS-optimized AMI that ami_type would select. When set, custom_user_data must carry the MIME multipart NodeConfig that bootstraps the node, because EKS no longer injects it (rules.md B-4)"
 
   validation {
     condition     = var.custom_ami_id == null || can(regex("^ami-[0-9a-f]+$", var.custom_ami_id))

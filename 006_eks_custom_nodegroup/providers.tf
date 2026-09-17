@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.9"
   required_providers {
     aws     = { source = "hashicorp/aws", version = "~> 6.0" }
     tls     = { source = "hashicorp/tls", version = "~> 4.0" }
@@ -14,7 +14,7 @@ provider "aws" {
 # get-token" flow the _monolithic bastion used after "aws eks
 # update-kubeconfig", so the AWS Load Balancer Controller, cluster autoscaler,
 # kube-ops-view and the HPA demo are installed without a kubeconfig file or a
-# shell session on an EC2 instance (rules.md #18).
+# shell session on an EC2 instance (rules.md E-1).
 #
 # helm needs no API server access at plan time, only at apply time, so
 # hashicorp/helm works even though its configuration depends on a cluster
@@ -54,7 +54,7 @@ provider "helm" {
 # hashicorp/kubernetes fails at plan time with "cannot create REST client: no
 # client config" when its host/CA come from a cluster that does not exist yet.
 # lazy_load defers building the real client until a kubectl_manifest resource is
-# first used, by which point the cluster exists (rules.md #26).
+# first used, by which point the cluster exists (rules.md E-2).
 provider "kubectl" {
   host                   = module.eks_cluster.cluster_endpoint
   cluster_ca_certificate = base64decode(module.eks_cluster.certificate_authority_data)

@@ -6,7 +6,7 @@ variable "aws_region" {
 variable "organization_root_id" {
   type        = string
   default     = null
-  description = "Root ID of an AWS Organization that already exists. When null, the organization is created. The _monolithic template made this a required variable whose empty-string value meant \"create one\"; null is the idiomatic optional switch (rules.md #4)"
+  description = "Root ID of an AWS Organization that already exists. When null, the organization is created. The _monolithic template made this a required variable whose empty-string value meant \"create one\"; null is the idiomatic optional switch (rules.md B-4)"
 
   validation {
     condition     = var.organization_root_id == null || can(regex("^r-[0-9a-z]{4,32}$", var.organization_root_id))

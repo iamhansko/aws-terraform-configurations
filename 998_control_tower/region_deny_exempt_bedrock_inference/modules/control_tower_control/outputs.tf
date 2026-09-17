@@ -4,7 +4,7 @@ output "control_arn" {
 }
 output "control_identifier" {
   value       = var.control_identifier
-  description = "ARN of the control that was enabled, re-exposed so callers reference one source of truth (rules.md #5)"
+  description = "ARN of the control that was enabled, re-exposed so callers reference one source of truth (rules.md B-5)"
 }
 output "target_identifier" {
   value       = var.target_identifier

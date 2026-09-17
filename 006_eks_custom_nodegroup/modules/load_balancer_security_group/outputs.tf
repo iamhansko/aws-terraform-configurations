@@ -8,5 +8,5 @@ output "security_group_name" {
 }
 output "port" {
   value       = var.port
-  description = "Listener port opened on the group, re-exposed so the workload's Service port references one source of truth (rules.md #5)"
+  description = "Listener port opened on the group, re-exposed so the workload's Service port references one source of truth (rules.md B-5)"
 }

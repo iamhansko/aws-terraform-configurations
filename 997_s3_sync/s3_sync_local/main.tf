@@ -21,6 +21,6 @@ module "s3_sync_local" {
   # exist before the local-exec provisioner's `aws s3 sync` call runs
   # against it; module.s3_bucket.bucket alone only orders this after the
   # aws_s3_bucket resource itself, not the bucket's other sub-resources
-  # (rules.md #27's reasoning applied to a bucket instead of network).
+  # (rules.md D-3's reasoning applied to a bucket instead of network).
   depends_on = [module.s3_bucket]
 }

@@ -65,6 +65,6 @@ resource "aws_instance" "bastion_ec2" {
   }
 
   # The instance role must have its managed policy attached before EKS/AWS
-  # APIs will accept it via the instance profile (rules.md #12).
+  # APIs will accept it via the instance profile (rules.md D-1).
   depends_on = [aws_iam_role_policy_attachment.bastion_ec2_iam_role]
 }

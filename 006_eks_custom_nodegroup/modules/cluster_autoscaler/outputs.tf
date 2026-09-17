@@ -12,5 +12,5 @@ output "controller_role_arn" {
 }
 output "namespace" {
   value       = var.namespace
-  description = "Namespace the cluster autoscaler runs in, re-exposed so callers reference one source of truth (rules.md #5)"
+  description = "Namespace the cluster autoscaler runs in, re-exposed so callers reference one source of truth (rules.md B-5)"
 }

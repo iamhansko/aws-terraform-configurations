@@ -12,7 +12,7 @@ resource "aws_security_group" "node_security_group" {
   # a controller-added rule can reference the group being deleted (or form a
   # cycle with another group), which blocks the destroy. This revokes the
   # group's attached rules first, including the ones Terraform did not create
-  # (rules.md #31).
+  # (rules.md F-2).
   revoke_rules_on_delete = var.revoke_rules_on_delete
   tags = {
     Name = var.name
@@ -31,7 +31,7 @@ resource "aws_vpc_security_group_ingress_rule" "node_security_group_self_ingress
 # Iterating the map directly, not toset() over a list of IDs: the IDs come from
 # another module's security group and are unknown until apply, and for_each needs
 # keys it can determine during plan. The caller's labels supply them
-# (rules.md #32).
+# (rules.md B-8).
 resource "aws_vpc_security_group_ingress_rule" "node_security_group_source_ingress" {
   for_each                     = var.ingress_source_security_groups
   security_group_id            = aws_security_group.node_security_group.id

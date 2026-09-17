@@ -1,6 +1,6 @@
 # Created only when the caller did not supply an existing root, so this module
 # works both for a greenfield organization and for an account that already has
-# one (rules.md #4).
+# one (rules.md B-4).
 resource "aws_organizations_organization" "organization" {
   count       = var.organization_root_id == null ? 1 : 0
   feature_set = var.feature_set

@@ -1,7 +1,7 @@
 variable "organization_root_id" {
   type        = string
   default     = null
-  description = "Root ID of an AWS Organization that already exists. When null, this module creates the organization and uses its root. The _monolithic template used an empty string as the sentinel instead, which meant the caller had to pass \"\" explicitly to get a new organization; null is the idiomatic form for an optional switch (rules.md #4)"
+  description = "Root ID of an AWS Organization that already exists. When null, this module creates the organization and uses its root. The _monolithic template used an empty string as the sentinel instead, which meant the caller had to pass \"\" explicitly to get a new organization; null is the idiomatic form for an optional switch (rules.md B-4)"
 
   validation {
     condition     = var.organization_root_id == null || can(regex("^r-[0-9a-z]{4,32}$", var.organization_root_id))
@@ -21,7 +21,7 @@ variable "feature_set" {
 variable "organizational_unit_names" {
   type        = list(string)
   default     = ["Johan"]
-  description = "Names of the organizational units created directly under the root, one per entry via for_each rather than a copied resource block per OU (rules.md #13). Control Tower creates its own Security OU during landing zone setup, so do not list it here"
+  description = "Names of the organizational units created directly under the root, one per entry via for_each rather than a copied resource block per OU (rules.md B-7). Control Tower creates its own Security OU during landing zone setup, so do not list it here"
 
   validation {
     condition     = length(var.organizational_unit_names) > 0

@@ -4,7 +4,7 @@
 # to leave the DEGRADED state and become ACTIVE. Split into its own module
 # so the root can order it after node capacity
 # (eks_fargate_profile/eks_node_group/karpenter) exists, while vpc-cni/
-# kube-proxy stay ordered before it (rules.md #28).
+# kube-proxy stay ordered before it (rules.md C-4).
 resource "aws_eks_addon" "coredns" {
   cluster_name                = var.cluster_name
   addon_name                  = "coredns"

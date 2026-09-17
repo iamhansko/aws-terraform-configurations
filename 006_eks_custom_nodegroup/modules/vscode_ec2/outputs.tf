@@ -20,7 +20,7 @@ output "vscode_url" {
 }
 output "code_server_port" {
   value       = var.code_server_port
-  description = "Port code-server listens on, re-exposed so a CloudFront origin or load balancer in the root module references one source of truth (rules.md #5)"
+  description = "Port code-server listens on, re-exposed so a CloudFront origin or load balancer in the root module references one source of truth (rules.md B-5)"
 }
 output "iam_role_arn" {
   value       = aws_iam_role.vscode_ec2_iam_role.arn
@@ -36,5 +36,5 @@ output "security_group_id" {
 }
 output "marker_file_path" {
   value       = var.marker_file_path
-  description = "Directory where the userdata completion marker file is created, or null if marker_file_path was not set (rules.md #5)"
+  description = "Directory where the userdata completion marker file is created, or null if marker_file_path was not set (rules.md B-5)"
 }

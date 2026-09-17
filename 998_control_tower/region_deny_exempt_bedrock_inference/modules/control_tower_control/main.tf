@@ -7,7 +7,7 @@
 #
 #   1. The landing zone must already be set up. target_identifier only creates a
 #      dependency on the OU, so the root has to order this module after the
-#      landing zone module with depends_on (rules.md #22).
+#      landing zone module with depends_on (rules.md D-2).
 #   2. The OU must be registered with Control Tower. Enabling a control on an OU
 #      Control Tower does not govern fails with a ValidationException.
 resource "aws_controltower_control" "control_tower_control" {

@@ -12,9 +12,9 @@ output "controller_role_arn" {
 }
 output "namespace" {
   value       = var.namespace
-  description = "Namespace the controller runs in, re-exposed so callers waiting on it reference one source of truth (rules.md #5)"
+  description = "Namespace the controller runs in, re-exposed so callers waiting on it reference one source of truth (rules.md B-5)"
 }
 output "service_account_name" {
   value       = var.service_account_name
-  description = "Service account name the controller runs as, re-exposed for the same reason as namespace (rules.md #5)"
+  description = "Service account name the controller runs as, re-exposed for the same reason as namespace (rules.md B-5)"
 }

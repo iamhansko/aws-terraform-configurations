@@ -1,6 +1,6 @@
 output "namespace" {
   value       = var.namespace
-  description = "Namespace kube-ops-view runs in, re-exposed so callers reference one source of truth (rules.md #5)"
+  description = "Namespace kube-ops-view runs in, re-exposed so callers reference one source of truth (rules.md B-5)"
 }
 output "service_name" {
   value       = var.name
@@ -20,13 +20,13 @@ output "describe_command" {
 }
 output "load_balancer_hostname_command" {
   value       = var.service_type == "LoadBalancer" ? local.load_balancer_hostname_command : null
-  description = "Command that prints just the load balancer's DNS name, or null when service_type is not LoadBalancer and there is none. The load balancer is created by the AWS Load Balancer Controller rather than by Terraform, so its address cannot be a Terraform output and has to be read from the cluster instead (rules.md #35/#38)"
+  description = "Command that prints just the load balancer's DNS name, or null when service_type is not LoadBalancer and there is none. The load balancer is created by the AWS Load Balancer Controller rather than by Terraform, so its address cannot be a Terraform output and has to be read from the cluster instead (rules.md H-2/G-1)"
 }
 output "load_balancer_fetch_command" {
   value       = var.service_type == "LoadBalancer" ? "curl -s http://$(${local.load_balancer_hostname_command})" : null
-  description = "Command that fetches the dashboard through the load balancer, or null when service_type is not LoadBalancer. Built from load_balancer_hostname_command so both reference one source of truth (rules.md #5)"
+  description = "Command that fetches the dashboard through the load balancer, or null when service_type is not LoadBalancer. Built from load_balancer_hostname_command so both reference one source of truth (rules.md B-5)"
 }
 output "container_port" {
   value       = var.container_port
-  description = "Port the dashboard listens on inside the pod, and the Service's targetPort. Re-exposed because with an ip target type the load balancer registers pod IPs on this port, so a caller opening the node-side path has to allow exactly it rather than the Service port (rules.md #5/#38)"
+  description = "Port the dashboard listens on inside the pod, and the Service's targetPort. Re-exposed because with an ip target type the load balancer registers pod IPs on this port, so a caller opening the node-side path has to allow exactly it rather than the Service port (rules.md B-5/G-1)"
 }

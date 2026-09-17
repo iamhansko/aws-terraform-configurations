@@ -34,7 +34,7 @@ resource "aws_eks_cluster" "eks_cluster" {
   # self-managed addons at cluster creation, so they are exclusively managed
   # by the aws_eks_addon resources in modules/eks_vpc_cni_addon,
   # modules/eks_kube_proxy_addon, and modules/eks_coredns_addon instead.
-  # Changing this value forces cluster replacement (rules.md #28).
+  # Changing this value forces cluster replacement (rules.md C-4).
   bootstrap_self_managed_addons = false
 
   depends_on = [aws_iam_role_policy_attachment.eks_cluster_iam_role]

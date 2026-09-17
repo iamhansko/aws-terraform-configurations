@@ -37,6 +37,6 @@ module "control_tower_landing_zone" {
   # A landing zone requires an organization with ALL features enabled, but the
   # manifest only carries account IDs - it references nothing the organization
   # module produces, so Terraform's graph would otherwise let the two be created
-  # in parallel and the landing zone could reach the API first (rules.md #22).
+  # in parallel and the landing zone could reach the API first (rules.md D-2).
   depends_on = [module.organization]
 }

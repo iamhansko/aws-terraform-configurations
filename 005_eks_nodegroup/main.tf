@@ -31,7 +31,7 @@ module "eks_vpc_cni_addon" {
   # bootstrap_self_managed_addons = false (modules/eks_cluster) means
   # vpc-cni does not exist until this aws_eks_addon resource creates it. As
   # a DaemonSet it becomes ACTIVE with zero nodes, so it's created before
-  # the node group instead of after it (rules.md #28) - worker nodes need
+  # the node group instead of after it (rules.md C-4) - worker nodes need
   # it running to join the cluster in a Ready state.
   depends_on = [module.network, module.eks_cluster]
 }
@@ -42,7 +42,7 @@ module "eks_kube_proxy_addon" {
   cluster_name = module.eks_cluster.cluster_name
 
   # Same reasoning as eks_vpc_cni_addon above: kube-proxy is a DaemonSet
-  # and must exist before the node group (rules.md #28).
+  # and must exist before the node group (rules.md C-4).
   depends_on = [module.network, module.eks_cluster]
 }
 
@@ -55,7 +55,7 @@ module "eks_node_group" {
   subnet_ids             = module.network.private_subnet_ids
 
   # Nodes need vpc-cni/kube-proxy running to join the cluster Ready
-  # (rules.md #28).
+  # (rules.md C-4).
   depends_on = [module.network, module.eks_vpc_cni_addon, module.eks_kube_proxy_addon]
 }
 
@@ -66,7 +66,7 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable node capacity to leave
   # its DEGRADED state and become ACTIVE, so it's created after the node
-  # group instead of before it (rules.md #28).
+  # group instead of before it (rules.md C-4).
   depends_on = [module.eks_node_group]
 }
 

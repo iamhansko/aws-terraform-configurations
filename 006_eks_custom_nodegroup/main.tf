@@ -10,7 +10,7 @@ module "key_pair" {
 
   # key_pair consumes no network output, so nothing would otherwise order it
   # against the network module's resources. Every module in a root that has a
-  # network module waits for all of it (rules.md #27).
+  # network module waits for all of it (rules.md D-3).
   depends_on = [module.network]
 }
 module "ecr" {
@@ -37,7 +37,7 @@ module "eks_cluster" {
   kubernetes_version = var.kubernetes_version
   subnet_ids         = concat(module.network.public_subnet_ids, module.network.private_subnet_ids)
   # Handed an ID list; the cluster module never learns this group is also on the
-  # worker nodes (rules.md #15).
+  # worker nodes (rules.md B-6).
   additional_security_group_ids = [module.node_security_group.security_group_id]
   endpoint_public_access        = var.endpoint_public_access
   public_access_cidrs           = var.public_access_cidrs
@@ -45,7 +45,7 @@ module "eks_cluster" {
   # Referencing module.network.*_subnet_ids only orders this module after the
   # specific aws_subnet resources behind those outputs, not after the NAT
   # gateways and route table associations that never surface as outputs
-  # (rules.md #27).
+  # (rules.md D-3).
   depends_on = [module.network]
 }
 module "eks_vpc_cni_addon" {
@@ -56,7 +56,7 @@ module "eks_vpc_cni_addon" {
   # bootstrap_self_managed_addons = false on the cluster means vpc-cni does not
   # exist until this addon creates it. As a DaemonSet it reaches ACTIVE with
   # zero nodes, so it is created before any node capacity - worker nodes need it
-  # running to join the cluster Ready (rules.md #28).
+  # running to join the cluster Ready (rules.md C-4).
   depends_on = [module.network, module.eks_cluster]
 }
 module "eks_kube_proxy_addon" {
@@ -65,7 +65,7 @@ module "eks_kube_proxy_addon" {
   cluster_name = module.eks_cluster.cluster_name
 
   # Same reasoning as eks_vpc_cni_addon: kube-proxy is a DaemonSet and must
-  # exist before any node capacity (rules.md #28).
+  # exist before any node capacity (rules.md C-4).
   depends_on = [module.network, module.eks_cluster]
 }
 # Two node groups from one module, differing only in name and labels, so pods
@@ -92,7 +92,7 @@ module "eks_app_node_group" {
   custom_user_data       = var.node_group_custom_user_data
 
   # Nodes need vpc-cni and kube-proxy running to join the cluster Ready
-  # (rules.md #28).
+  # (rules.md C-4).
   depends_on = [module.network, module.eks_vpc_cni_addon, module.eks_kube_proxy_addon]
 }
 module "eks_addon_node_group" {
@@ -120,7 +120,7 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable node capacity to leave its
   # DEGRADED state and become ACTIVE, so it is created after the node groups
-  # rather than before them (rules.md #28).
+  # rather than before them (rules.md C-4).
   depends_on = [module.eks_app_node_group, module.eks_addon_node_group]
 }
 # The Horizontal Pod Autoscaler has no resource metrics without metrics-server,
@@ -132,7 +132,7 @@ module "eks_metrics_server_addon" {
   cluster_name = module.eks_cluster.cluster_name
 
   # metrics-server is a Deployment, so like coredns it needs schedulable node
-  # capacity to become ACTIVE rather than DEGRADED (rules.md #28).
+  # capacity to become ACTIVE rather than DEGRADED (rules.md C-4).
   depends_on = [module.eks_app_node_group, module.eks_addon_node_group]
 }
 module "aws_load_balancer_controller" {
@@ -147,7 +147,7 @@ module "aws_load_balancer_controller" {
 
   # The controller is a Deployment with wait = true, so it needs schedulable
   # capacity and working cluster DNS before the release can report ready
-  # (rules.md #22).
+  # (rules.md D-2).
   depends_on = [module.network, module.eks_coredns_addon]
 }
 module "cluster_autoscaler" {
@@ -163,7 +163,7 @@ module "cluster_autoscaler" {
 
   # The autoscaler discovers the node groups' Auto Scaling groups by tag, so the
   # groups must exist first; it is also a Deployment needing capacity and DNS
-  # (rules.md #22).
+  # (rules.md D-2).
   #
   # aws_load_balancer_controller is in this list for a different reason: it is
   # not a runtime dependency, it serializes the two Helm installs. Both pull
@@ -217,11 +217,11 @@ module "kube_ops_view" {
   } : {}
 
   # With service_type = LoadBalancer the Service is only fulfilled once the
-  # controller is reconciling (rules.md #22). These are kubectl_manifest
+  # controller is reconciling (rules.md D-2). These are kubectl_manifest
   # resources talking straight to the API server, so ordering the module after
   # the node group also makes terraform destroy remove the Service - letting the
   # controller delete the load balancer it created - before the nodes running
-  # the controller disappear (rules.md #29).
+  # the controller disappear (rules.md D-4).
   depends_on = [module.network, module.eks_app_node_group, module.aws_load_balancer_controller]
 }
 module "hpa_demo" {
@@ -232,14 +232,14 @@ module "hpa_demo" {
   max_replicas                      = var.hpa_max_replicas
   # Pins the demo pods to the application node group by reusing the very labels
   # that module was given, so the selector cannot drift from the node labels
-  # (rules.md #5).
+  # (rules.md B-5).
   node_selector = module.eks_app_node_group.labels
 
   # These are kubectl_manifest resources talking straight to the API server, and
   # the HorizontalPodAutoscaler is only functional once metrics-server is
   # serving the metrics API. Ordering the module after the node group also makes
   # terraform destroy remove these objects before the nodes running them
-  # disappear (rules.md #29).
+  # disappear (rules.md D-4).
   depends_on = [module.network, module.eks_app_node_group, module.eks_metrics_server_addon]
 }
 module "vscode_ec2" {
@@ -251,25 +251,25 @@ module "vscode_ec2" {
   instance_type               = var.vscode_instance_type
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
   # Lets the README association below know when the bootstrap has finished
-  # (rules.md #35). The module touches <path>/userdata as its very last step,
+  # (rules.md H-2). The module touches <path>/userdata as its very last step,
   # after everything in additional_user_data has run - which here includes the
   # sample image build, so the marker can be several minutes out.
   marker_file_path = var.marker_file_path
   # Joining the shared node security group is what lets this instance reach the
-  # private API server endpoint (rules.md #15).
+  # private API server endpoint (rules.md B-6).
   extra_security_group_ids = [module.node_security_group.security_group_id]
   additional_user_data     = <<-EOT
     # An EKS cluster and this instance live in the same root module, so the
     # instance is the workbench for that cluster and carries all five tools
     # unconditionally: code-server (installed by the module itself), plus
-    # kubectl, eksctl, helm and docker (rules.md #34). Docker used to sit behind
+    # kubectl, eksctl, helm and docker (rules.md H-1). Docker used to sit behind
     # build_sample_image, which left the workbench without a daemon whenever the
     # sample image was skipped - the image build below is what is optional, not
     # the tool.
     #
     # Building and pushing a container image needs a real Docker daemon on a
     # host, so unlike the kubectl/helm steps this cannot become a provider
-    # resource and stays in user data (rules.md #18).
+    # resource and stays in user data (rules.md E-1).
     dnf install -yq docker
     systemctl enable --now docker
     usermod -aG docker ec2-user
@@ -277,7 +277,7 @@ module "vscode_ec2" {
     # predates the docker group and its integrated terminals inherit whatever
     # groups that process started with. Restarting is what makes docker usable
     # from the IDE, rather than opening /var/run/docker.sock up to 666
-    # (rules.md #34).
+    # (rules.md H-1).
     systemctl restart code-server
     %{if var.build_sample_image~}
     mkdir -p /home/ec2-user/match
@@ -367,7 +367,7 @@ module "vscode_ec2" {
 }
 # Granting the bastion's instance role cluster access joins two modules that
 # know nothing about each other, so it belongs in the root rather than inside
-# either one (rules.md #14).
+# either one (rules.md C-1).
 resource "aws_eks_access_entry" "vscode_access_entry" {
   cluster_name  = module.eks_cluster.cluster_name
   principal_arn = module.vscode_ec2.iam_role_arn
@@ -386,7 +386,7 @@ resource "aws_eks_access_policy_association" "vscode_access_policy_association" 
 locals {
   # Every output this project exposes, defined once. outputs.tf projects these
   # and the README below renders them, so no value expression is written twice
-  # (rules.md #5/#35). Adding an entry here is what makes an output possible,
+  # (rules.md B-5/H-2). Adding an entry here is what makes an output possible,
   # which is what keeps the README from silently falling behind outputs.tf.
   #
   # The map's keys are the output names, and order decides the README's section
@@ -395,7 +395,7 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server"
-      description = "Open the IDE here. Every command below is meant to be run from its terminal, and it already has kubectl, eksctl, helm and docker installed (rules.md #34)"
+      description = "Open the IDE here. Every command below is meant to be run from its terminal, and it already has kubectl, eksctl, helm and docker installed (rules.md H-1)"
       value       = module.vscode_ec2.vscode_url
     }
     cluster_name = {
@@ -437,13 +437,13 @@ locals {
     kube_ops_view_service_command = {
       order       = 8
       title       = "1. Check the dashboard Service"
-      description = "The EXTERNAL-IP column fills in with the NLB's DNS name once the AWS Load Balancer Controller has reconciled the Service. If it never fills in, the controller is not handling the Service - check its log (rules.md #38)"
+      description = "The EXTERNAL-IP column fills in with the NLB's DNS name once the AWS Load Balancer Controller has reconciled the Service. If it never fills in, the controller is not handling the Service - check its log (rules.md G-1)"
       value       = module.kube_ops_view.describe_command
     }
     kube_ops_view_endpoint_command = {
       order       = 9
       title       = "2. Read the NLB DNS name"
-      description = "The NLB is created by the controller rather than by Terraform, so its address cannot be a Terraform output and is read from the cluster instead (rules.md #35/#38)"
+      description = "The NLB is created by the controller rather than by Terraform, so its address cannot be a Terraform output and is read from the cluster instead (rules.md H-2/G-1)"
       value       = module.kube_ops_view.load_balancer_hostname_command
     }
     kube_ops_view_fetch_command = {
@@ -475,7 +475,7 @@ locals {
     for key, entry in local.outputs : format("%02d-%s", entry.order, key) => entry
   })
   # Rendered from the same map, so an added output shows up here without anyone
-  # remembering to edit two places (rules.md #35).
+  # remembering to edit two places (rules.md H-2).
   readme_body = join("\n", concat(
     ["# ${var.cluster_name}", ""],
     flatten([for entry in local.readme_ordered : [
@@ -485,9 +485,9 @@ locals {
 }
 # The work happens inside code-server in a browser, where "terraform output" is
 # not available, so every output above is also written to a README in the home
-# directory the IDE opens (rules.md #35). Combining several modules' outputs is
+# directory the IDE opens (rules.md H-2). Combining several modules' outputs is
 # the root's job, so this lives here rather than inside the instance module,
-# which never learns what gets written into its home directory (rules.md #14).
+# which never learns what gets written into its home directory (rules.md C-1).
 resource "aws_ssm_association" "vscode_readme" {
   name                             = "AWS-RunShellScript"
   wait_for_success_timeout_seconds = var.readme_timeout_seconds
@@ -498,9 +498,9 @@ resource "aws_ssm_association" "vscode_readme" {
   parameters = {
     # The until loop, not depends_on or wait_for_success_timeout_seconds, is what
     # orders this after the instance bootstrap, and the marker this command
-    # leaves behind is what a later association would wait on (rules.md #6). The
+    # leaves behind is what a later association would wait on (rules.md D-5). The
     # marker path comes back out of the module it was passed into, so it is
-    # defined in exactly one place (rules.md #5).
+    # defined in exactly one place (rules.md B-5).
     #
     # SSM runs as root, hence the chown - without it the file is not editable
     # from the IDE. The heredoc delimiter is quoted and deliberately unlikely to

@@ -3,7 +3,7 @@
 # addons must be false on the cluster (see modules/eks_cluster) and this
 # module must be created before the node group. As a DaemonSet, it becomes
 # ACTIVE with zero nodes (desired == ready == 0), so it only needs the
-# cluster to exist (rules.md #28). Split into its own module (rather than
+# cluster to exist (rules.md C-4). Split into its own module (rather than
 # sharing one with vpc-cni) so each EKS-managed addon can be independently
 # versioned/upgraded/replaced without affecting the others.
 resource "aws_eks_addon" "kube_proxy" {

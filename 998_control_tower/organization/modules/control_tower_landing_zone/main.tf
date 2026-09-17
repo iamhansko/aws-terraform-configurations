@@ -1,6 +1,6 @@
 # The manifest is assembled from variables instead of being a hardcoded JSON
 # blob, so retention, governed Regions and the shared account IDs are inputs
-# rather than edits to a literal (rules.md #7).
+# rather than edits to a literal (rules.md B-3).
 #
 # Shape follows the published landing zone 4.0 schema
 # (https://docs.aws.amazon.com/controltower/latest/userguide/landing-zone-schemas.html):

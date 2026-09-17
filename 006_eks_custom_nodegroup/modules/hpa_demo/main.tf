@@ -5,11 +5,11 @@
 #   kubectl autoscale deployment php-apache --cpu-percent=60 --min=1 --max=10
 # Four imperative commands whose result existed only in the cluster; as
 # resources, terraform plan shows drift and terraform destroy removes them
-# (rules.md #18).
+# (rules.md E-1).
 #
 # Uses alekc/kubectl rather than hashicorp/kubernetes because this module is
 # applied in the same terraform apply as the cluster whose outputs configure
-# the provider (rules.md #26).
+# the provider (rules.md E-2).
 resource "kubectl_manifest" "hpa_demo_deployment" {
   yaml_body = yamlencode({
     apiVersion = "apps/v1"
@@ -100,6 +100,6 @@ resource "kubectl_manifest" "hpa_demo_autoscaler" {
   })
 
   # scaleTargetRef.name is a literal string, so nothing else tells Terraform
-  # the Deployment must exist first (rules.md #26).
+  # the Deployment must exist first (rules.md E-2).
   depends_on = [kubectl_manifest.hpa_demo_deployment]
 }

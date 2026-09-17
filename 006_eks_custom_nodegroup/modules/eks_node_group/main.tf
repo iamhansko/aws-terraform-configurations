@@ -61,6 +61,6 @@ resource "aws_eks_node_group" "eks_node_group" {
   }
   # The node role must already carry AmazonEKSWorkerNodePolicy and friends
   # before EKS accepts the create call; node_role_arn alone doesn't order this
-  # module after the attachments (rules.md #12).
+  # module after the attachments (rules.md D-1).
   depends_on = [aws_iam_role_policy_attachment.eks_node_iam_role]
 }

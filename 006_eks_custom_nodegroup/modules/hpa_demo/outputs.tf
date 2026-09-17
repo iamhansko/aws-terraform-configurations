@@ -1,6 +1,6 @@
 output "name" {
   value       = var.name
-  description = "Name shared by the demo Deployment, Service and HorizontalPodAutoscaler (rules.md #5)"
+  description = "Name shared by the demo Deployment, Service and HorizontalPodAutoscaler (rules.md B-5)"
 }
 output "namespace" {
   value       = var.namespace

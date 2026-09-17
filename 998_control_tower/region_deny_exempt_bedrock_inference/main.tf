@@ -41,7 +41,7 @@ module "control_tower_landing_zone" {
   # A landing zone requires an organization with ALL features enabled, but the
   # manifest only carries account IDs - it references nothing the organization
   # module produces, so Terraform's graph would otherwise let the two be created
-  # in parallel and the landing zone could reach the API first (rules.md #22).
+  # in parallel and the landing zone could reach the API first (rules.md D-2).
   depends_on = [module.organization]
 }
 # The variant's reason for existing: deny every Region outside the governed set
@@ -54,7 +54,7 @@ module "region_deny_control" {
   control_identifier = var.region_deny_control_identifier
   # Selected out of the organization module's name-to-ARN map, so the target
   # follows the OU that was actually created rather than a hand-copied ARN
-  # (rules.md #5).
+  # (rules.md B-5).
   target_identifier = module.organization.organizational_unit_arns[var.control_target_ou_name]
 
   # Values are JSON documents rather than plain strings, which is what the
@@ -67,7 +67,7 @@ module "region_deny_control" {
   # A control can only be enabled once Control Tower governs the target OU, which
   # cannot be true before the landing zone exists. target_identifier only orders
   # this module after the OU, so the landing zone dependency is explicit
-  # (rules.md #22). It also makes terraform destroy disable the control before
+  # (rules.md D-2). It also makes terraform destroy disable the control before
   # tearing the landing zone down, rather than leaving an EnabledControl pointing
   # at a landing zone that is going away.
   depends_on = [module.organization, module.control_tower_landing_zone]

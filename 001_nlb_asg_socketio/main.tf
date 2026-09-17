@@ -9,7 +9,7 @@ module "key_pair" {
 
   # key_pair doesn't reference any network output, so without this the
   # network module's own resources (NAT gateways, routes, etc.) would have
-  # no ordering relationship with it at all (rules.md #27).
+  # no ordering relationship with it at all (rules.md D-3).
   depends_on = [module.network]
 }
 

@@ -1,5 +1,5 @@
 # Every output is a projection of local.outputs in main.tf, which is also what
-# the README written onto the VS Code instance is rendered from (rules.md #35).
+# the README written onto the VS Code instance is rendered from (rules.md H-2).
 # No value expression is written here: an output that built its own value would
 # be missing from that README, and nothing would fail to tell anyone - the apply
 # would succeed either way. Whether this pattern still holds is checked by

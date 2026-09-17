@@ -30,7 +30,7 @@ module "eks_vpc_cni_addon" {
   cluster_name = module.eks_cluster.cluster_name
 
   # vpc-cni is a DaemonSet and becomes ACTIVE with zero nodes, so it only
-  # needs the cluster (rules.md #28) and is created before any node
+  # needs the cluster (rules.md C-4) and is created before any node
   # capacity (eks_fargate_profile/karpenter) exists.
   depends_on = [module.eks_cluster]
 }
@@ -41,7 +41,7 @@ module "eks_kube_proxy_addon" {
   cluster_name = module.eks_cluster.cluster_name
 
   # kube-proxy is a DaemonSet and becomes ACTIVE with zero nodes, so it
-  # only needs the cluster (rules.md #28) and is created before any node
+  # only needs the cluster (rules.md C-4) and is created before any node
   # capacity (eks_fargate_profile/karpenter) exists.
   depends_on = [module.eks_cluster]
 }
@@ -56,7 +56,7 @@ module "eks_fargate_profile" {
 
   # vpc-cni/kube-proxy must be running before workloads (including
   # coredns, once it's scheduled onto this profile) can rely on pod
-  # networking (rules.md #28).
+  # networking (rules.md C-4).
   depends_on = [module.eks_vpc_cni_addon, module.eks_kube_proxy_addon]
 }
 
@@ -67,7 +67,7 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave
   # DEGRADED and become ACTIVE; that capacity is the kube-system Fargate
-  # profile, which must exist first (rules.md #28).
+  # profile, which must exist first (rules.md C-4).
   depends_on = [module.eks_fargate_profile]
 }
 
@@ -79,7 +79,7 @@ module "karpenter" {
   oidc_issuer_host  = module.eks_cluster.oidc_issuer_host
 
   # The Karpenter controller pod needs coredns ACTIVE to resolve DNS and
-  # reach the EKS API (rules.md #22, #28).
+  # reach the EKS API (rules.md D-2, #28).
   depends_on = [module.eks_coredns_addon]
 }
 

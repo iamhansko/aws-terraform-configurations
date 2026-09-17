@@ -38,7 +38,7 @@ variable "description" {
 variable "ingress_source_security_groups" {
   type        = map(string)
   default     = {}
-  description = "Additional security group IDs allowed to send any traffic to members of this group, keyed by a caller-chosen label, on top of the self-referencing rule. Used to let a bastion reach the API server endpoint the cluster exposes through this group. A map rather than a list because these IDs are usually another module's output, unknown until apply, and for_each needs statically known keys (rules.md #32)"
+  description = "Additional security group IDs allowed to send any traffic to members of this group, keyed by a caller-chosen label, on top of the self-referencing rule. Used to let a bastion reach the API server endpoint the cluster exposes through this group. A map rather than a list because these IDs are usually another module's output, unknown until apply, and for_each needs statically known keys (rules.md B-8)"
 
   validation {
     condition     = alltrue([for label in keys(var.ingress_source_security_groups) : can(regex("^[a-zA-Z0-9._-]+$", label))])

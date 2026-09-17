@@ -24,5 +24,5 @@ output "organizational_unit_arns" {
 }
 output "organizational_unit_names" {
   value       = var.organizational_unit_names
-  description = "Names of the OUs created, re-exposed so a caller picking a target OU references one source of truth (rules.md #5)"
+  description = "Names of the OUs created, re-exposed so a caller picking a target OU references one source of truth (rules.md B-5)"
 }

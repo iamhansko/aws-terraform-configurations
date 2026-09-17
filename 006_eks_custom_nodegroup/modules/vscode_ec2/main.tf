@@ -55,7 +55,7 @@ resource "aws_iam_role_policy_attachment" "vscode_ec2_iam_role" {
 }
 # aws_iam_instance_profile.role takes a single role name, not the list that
 # CloudFormation's AWS::IAM::InstanceProfile Roles property accepts
-# (rules.md #25).
+# (rules.md A-3).
 resource "aws_iam_instance_profile" "vscode_ec2_instance_profile" {
   role = aws_iam_role.vscode_ec2_iam_role.name
 }
@@ -119,6 +119,6 @@ resource "aws_instance" "vscode_ec2" {
   }
   # The instance profile's role must already carry its managed policies before
   # the instance boots, otherwise the bootstrap script's AWS calls fail with
-  # AccessDenied (rules.md #12).
+  # AccessDenied (rules.md D-1).
   depends_on = [aws_iam_role_policy_attachment.vscode_ec2_iam_role]
 }

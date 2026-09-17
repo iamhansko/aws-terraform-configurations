@@ -2,14 +2,14 @@
 #   eksctl create iamserviceaccount --name aws-load-balancer-controller ...
 #   helm repo add eks https://aws.github.io/eks-charts
 #   helm install aws-load-balancer-controller eks/aws-load-balancer-controller
-# from a shell on the bastion (rules.md #18). eksctl's iamserviceaccount step
+# from a shell on the bastion (rules.md E-1). eksctl's iamserviceaccount step
 # built a CloudFormation stack Terraform knew nothing about; here the IRSA role
 # is a first-class resource in state.
 #
 # The IAM role and the Helm release stay in one module because helm_release
 # references the role ARN directly and neither half is useful alone
-# (rules.md #21). The cross-module rule about injecting ARNs through variables
-# (rules.md #14/#15) applies between modules with different responsibilities,
+# (rules.md C-2). The cross-module rule about injecting ARNs through variables
+# (rules.md C-1/B-6) applies between modules with different responsibilities,
 # not within a single component.
 resource "aws_iam_role" "aws_load_balancer_controller_iam_role" {
   assume_role_policy = jsonencode({
@@ -129,7 +129,7 @@ resource "helm_release" "aws_load_balancer_controller" {
     # the flag is omitted from the Deployment entirely, and the controller falls
     # back to its own default of true - silently the opposite of what was asked.
     # helm --set infers a boolean from "false", so this entry must never carry
-    # type = "string" (rules.md #33/#37).
+    # type = "string" (rules.md E-7/G-2).
     {
       name  = "enableBackendSecurityGroup"
       value = tostring(var.enable_backend_security_group)
@@ -140,6 +140,6 @@ resource "helm_release" "aws_load_balancer_controller" {
 
   # The role must already carry its inline policy before the controller starts
   # reconciling Ingresses, and referencing the role's ARN alone doesn't order
-  # this release after the policy (rules.md #12).
+  # this release after the policy (rules.md D-1).
   depends_on = [aws_iam_role_policy.aws_load_balancer_controller_iam_role]
 }

@@ -26,7 +26,7 @@ variable "kubernetes_version" {
 variable "endpoint_public_access" {
   type        = bool
   default     = true
-  description = "Whether the EKS cluster API server endpoint is reachable from the public internet. Needed because the helm and kubectl providers run from the machine executing terraform apply rather than from inside the VPC (rules.md #18/#26); the _monolithic design instead ran helm and kubectl from the bastion inside the VPC, which is why the underlying eks_cluster module still defaults this to false. Restrict access with public_access_cidrs rather than leaving it open to 0.0.0.0/0"
+  description = "Whether the EKS cluster API server endpoint is reachable from the public internet. Needed because the helm and kubectl providers run from the machine executing terraform apply rather than from inside the VPC (rules.md E-1/E-2); the _monolithic design instead ran helm and kubectl from the bastion inside the VPC, which is why the underlying eks_cluster module still defaults this to false. Restrict access with public_access_cidrs rather than leaving it open to 0.0.0.0/0"
 }
 variable "public_access_cidrs" {
   type        = list(string)
@@ -231,7 +231,7 @@ variable "allow_inbound_from_anywhere" {
 variable "build_sample_image" {
   type        = bool
   default     = true
-  description = "Whether the VS Code EC2 instance builds and pushes the sample Go match-making image into the ECR repository. Only the build is optional: Docker itself is always installed, because an EKS cluster and this instance share a root module and that makes the instance the workbench for the cluster (rules.md #34). Building an image genuinely needs a daemon on a host, which is why this step stays in user data rather than becoming a provider resource (rules.md #18)"
+  description = "Whether the VS Code EC2 instance builds and pushes the sample Go match-making image into the ECR repository. Only the build is optional: Docker itself is always installed, because an EKS cluster and this instance share a root module and that makes the instance the workbench for the cluster (rules.md H-1). Building an image genuinely needs a daemon on a host, which is why this step stays in user data rather than becoming a provider resource (rules.md E-1)"
 }
 variable "kubectl_download_version" {
   type        = string
@@ -246,12 +246,12 @@ variable "kubectl_download_version" {
 variable "enable_backend_security_group" {
   type        = bool
   default     = false
-  description = "Whether the AWS Load Balancer Controller uses a shared backend security group (the k8s-traffic-<cluster>-<hash> group it creates, attaches to every load balancer, and names as the traffic source in the rules it adds to the node security group). False here because no workload in this project supplies its own frontend security group, so the controller auto-creates one per load balancer and sources the node-side rules from it directly - one fewer security group, and the data path is visible on the group the load balancer actually carries. Leave true in a project where an Ingress or Service sets the manage-backend-security-group-rules annotation alongside its own frontend security group: upstream requires the shared group for that combination, and with it false the load balancer provisions but never reaches the pods (rules.md #37)"
+  description = "Whether the AWS Load Balancer Controller uses a shared backend security group (the k8s-traffic-<cluster>-<hash> group it creates, attaches to every load balancer, and names as the traffic source in the rules it adds to the node security group). False here because no workload in this project supplies its own frontend security group, so the controller auto-creates one per load balancer and sources the node-side rules from it directly - one fewer security group, and the data path is visible on the group the load balancer actually carries. Leave true in a project where an Ingress or Service sets the manage-backend-security-group-rules annotation alongside its own frontend security group: upstream requires the shared group for that combination, and with it false the load balancer provisions but never reaches the pods (rules.md G-2)"
 }
 variable "marker_file_path" {
   type        = string
   default     = "/run/terraform"
-  description = "Directory holding the bootstrap marker files, shared between the vscode_ec2 module (which touches <path>/userdata as the last step of its user data) and the SSM association that writes the README once it appears (rules.md #6/#35). Under /run so the markers vanish on reboot rather than making a stale file look like a completed bootstrap"
+  description = "Directory holding the bootstrap marker files, shared between the vscode_ec2 module (which touches <path>/userdata as the last step of its user data) and the SSM association that writes the README once it appears (rules.md D-5/H-2). Under /run so the markers vanish on reboot rather than making a stale file look like a completed bootstrap"
 
   validation {
     condition     = can(regex("^/", var.marker_file_path))

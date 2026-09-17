@@ -1,7 +1,7 @@
 locals {
   # kube-ops-view is always fronted by a Service, never an Ingress, so unlike
   # the game_2048 module there is only one kind of object to read. Defined once
-  # so the commands this module exposes cannot disagree (rules.md #5).
+  # so the commands this module exposes cannot disagree (rules.md B-5).
   load_balancer_hostname_command = "kubectl -n ${var.namespace} get service ${var.name} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
 }
 # Declared as manifests rather than installed from a Helm chart, for two reasons
@@ -28,7 +28,7 @@ locals {
 # index cache is no longer on the critical path (see providers.tf).
 #
 # Uses alekc/kubectl because this module is applied in the same terraform apply
-# as the cluster whose outputs configure the provider (rules.md #24/#26).
+# as the cluster whose outputs configure the provider (rules.md E-3/E-2).
 locals {
   labels = {
     "app.kubernetes.io/name"       = var.name
@@ -98,7 +98,7 @@ resource "kubectl_manifest" "cluster_role_binding" {
   })
 
   # roleRef.name and the subject are literal strings, so nothing else tells
-  # Terraform the ClusterRole and ServiceAccount must exist first (rules.md #26).
+  # Terraform the ClusterRole and ServiceAccount must exist first (rules.md E-2).
   depends_on = [kubectl_manifest.cluster_role, kubectl_manifest.service_account]
 }
 resource "kubectl_manifest" "deployment" {

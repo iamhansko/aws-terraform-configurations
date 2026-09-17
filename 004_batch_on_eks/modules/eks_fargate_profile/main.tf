@@ -40,7 +40,7 @@ resource "aws_eks_fargate_profile" "fargate_profile" {
 # Declared as a raw manifest via the alekc/kubectl provider (kubectl_manifest)
 # instead of hashicorp/kubernetes' kubernetes_annotations, so the whole root
 # module (EKS cluster + this rollout trigger) can apply in a single
-# `terraform apply` (rules.md #26). Only spec.template.metadata.annotations
+# `terraform apply` (rules.md E-2). Only spec.template.metadata.annotations
 # is set; kubectl_manifest's merge-patch semantics leave every other field of
 # the existing coredns Deployment (containers, replicas, etc.) untouched, the
 # same way the previous kubernetes_annotations resource's template_annotations
