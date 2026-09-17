@@ -1,3 +1,9 @@
+locals {
+  # kube-ops-view is always fronted by a Service, never an Ingress, so unlike
+  # the game_2048 module there is only one kind of object to read. Defined once
+  # so the commands this module exposes cannot disagree (rules.md #5).
+  load_balancer_hostname_command = "kubectl -n ${var.namespace} get service ${var.name} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'"
+}
 # Declared as manifests rather than installed from a Helm chart, for two reasons
 # found the hard way:
 #

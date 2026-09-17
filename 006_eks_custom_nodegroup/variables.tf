@@ -231,7 +231,7 @@ variable "allow_inbound_from_anywhere" {
 variable "build_sample_image" {
   type        = bool
   default     = true
-  description = "Whether the VS Code EC2 instance installs Docker and builds/pushes the sample Go match-making image into the ECR repository. This genuinely needs a Docker daemon on a host, which is why it stays in user data rather than becoming a provider resource"
+  description = "Whether the VS Code EC2 instance builds and pushes the sample Go match-making image into the ECR repository. Only the build is optional: Docker itself is always installed, because an EKS cluster and this instance share a root module and that makes the instance the workbench for the cluster (rules.md #34). Building an image genuinely needs a daemon on a host, which is why this step stays in user data rather than becoming a provider resource (rules.md #18)"
 }
 variable "kubectl_download_version" {
   type        = string
@@ -241,5 +241,55 @@ variable "kubectl_download_version" {
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]{4}-[0-9]{2}-[0-9]{2}$", var.kubectl_download_version))
     error_message = "kubectl_download_version must look like 1.33.3/2025-08-03."
+  }
+}
+variable "enable_backend_security_group" {
+  type        = bool
+  default     = false
+  description = "Whether the AWS Load Balancer Controller uses a shared backend security group (the k8s-traffic-<cluster>-<hash> group it creates, attaches to every load balancer, and names as the traffic source in the rules it adds to the node security group). False here because no workload in this project supplies its own frontend security group, so the controller auto-creates one per load balancer and sources the node-side rules from it directly - one fewer security group, and the data path is visible on the group the load balancer actually carries. Leave true in a project where an Ingress or Service sets the manage-backend-security-group-rules annotation alongside its own frontend security group: upstream requires the shared group for that combination, and with it false the load balancer provisions but never reaches the pods (rules.md #37)"
+}
+variable "marker_file_path" {
+  type        = string
+  default     = "/run/terraform"
+  description = "Directory holding the bootstrap marker files, shared between the vscode_ec2 module (which touches <path>/userdata as the last step of its user data) and the SSM association that writes the README once it appears (rules.md #6/#35). Under /run so the markers vanish on reboot rather than making a stale file look like a completed bootstrap"
+
+  validation {
+    condition     = can(regex("^/", var.marker_file_path))
+    error_message = "marker_file_path must be an absolute path starting with '/'."
+  }
+}
+variable "readme_timeout_seconds" {
+  type        = number
+  default     = 1200
+  description = "How long the SSM association waits for the README command to report success. It has to cover the whole instance bootstrap, since the command's first act is to wait for the user data marker file - and this project's bootstrap also builds and pushes a container image when build_sample_image is true, so it runs longer than the other projects'"
+
+  validation {
+    condition     = var.readme_timeout_seconds > 0
+    error_message = "readme_timeout_seconds must be greater than zero."
+  }
+}
+variable "nlb_security_group_name" {
+  type        = string
+  default     = "nlb-sg"
+  description = "Name of the frontend security group handed to the aws-load-balancer-controller"
+
+  validation {
+    condition     = length(var.nlb_security_group_name) > 0
+    error_message = "nlb_security_group_name must not be empty."
+  }
+}
+variable "nlb_allow_inbound_from_anywhere" {
+  type        = bool
+  default     = true
+  description = "Whether the internet-facing NLB accepts HTTP from 0.0.0.0/0. True by default because an internet-facing scheme that nobody can reach is not much of a demo"
+}
+variable "nlb_service_cidr_blocks" {
+  type        = list(string)
+  default     = []
+  description = "Specific CIDR blocks allowed inbound on the NLB, for narrowing access to known networks instead of 0.0.0.0/0"
+
+  validation {
+    condition     = alltrue([for cidr in var.nlb_service_cidr_blocks : can(cidrhost(cidr, 0))])
+    error_message = "nlb_service_cidr_blocks must contain valid IPv4 CIDR blocks."
   }
 }

@@ -126,3 +126,8 @@ variable "additional_set_values" {
     error_message = "additional_set_values entries must each have a non-empty name."
   }
 }
+variable "enable_backend_security_group" {
+  type        = bool
+  default     = true
+  description = "Whether the controller uses a shared backend security group (the k8s-traffic-<cluster>-<hash> group it creates, attaches to every load balancer, and names as the traffic source in the rules it adds to node/ENI security groups). Maps to the controller's --enable-backend-security-group flag, whose own default is true. Set false to get the pre-v2.3.0 behaviour, where node-side rules reference each load balancer's own frontend security group instead - one fewer security group, at the cost of a rule per load balancer on the node security group, which can hit the per-group rule limit once there are many load balancers. MUST stay true when any Ingress or Service supplies its own frontend security group together with the manage-backend-security-group-rules annotation: upstream requires it for that combination, and with it false the controller stops managing the node-side rules, so the load balancer provisions but never reaches the pods (rules.md #37)"
+}

@@ -119,6 +119,21 @@ resource "helm_release" "aws_load_balancer_controller" {
       name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
       value = aws_iam_role.aws_load_balancer_controller_iam_role.arn
     },
+    # Controls the shared backend security group (the k8s-traffic-<cluster>-<hash>
+    # group the controller creates and attaches to every load balancer, then uses
+    # as the traffic source in the rules it adds to nodes).
+    #
+    # Rendered as a bare boolean rather than a quoted string. The chart guards
+    # this flag with {{ if kindIs "bool" .Values.enableBackendSecurityGroup }},
+    # which is a type check, not a truthiness check: a string "false" fails it,
+    # the flag is omitted from the Deployment entirely, and the controller falls
+    # back to its own default of true - silently the opposite of what was asked.
+    # helm --set infers a boolean from "false", so this entry must never carry
+    # type = "string" (rules.md #33/#37).
+    {
+      name  = "enableBackendSecurityGroup"
+      value = tostring(var.enable_backend_security_group)
+    },
     ],
     var.additional_set_values,
   )
