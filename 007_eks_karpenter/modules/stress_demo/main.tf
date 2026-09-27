@@ -55,6 +55,7 @@ resource "kubectl_manifest" "stress_deployment" {
   # The demo is run with "kubectl scale", which changes spec.replicas in the
   # cluster. Without this, the next plan would report that drift and the next
   # apply would snap the Deployment back to replica_count, undoing the scale-up
-  # mid-demo.
+  # mid-demo. Only that path is excluded, so the image and the stress arguments
+  # stay tracked (rules.md E-8).
   ignore_fields = ["spec.replicas"]
 }

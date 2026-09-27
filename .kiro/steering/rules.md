@@ -78,6 +78,11 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 | 포맷이 정렬되어 있는가 | `terraform fmt -check -recursive` (`_monolithic/`의 기계 변환 산출물 3개는 원래 정렬되어 있지 않습니다 — 조회 전용이므로 그대로 둡니다) | A-4 |
 | Helm 값이 의도한 타입으로 렌더링되는가 | `helm template` | E-7, G-2 |
 | 컨트롤러가 로드밸런서를 채택했는가 (2개가 아닌가) | `resourcegroupstaggingapi get-resources` | G-3 |
+| 컨트롤러가 바꾼 필드를 apply가 되돌리는가 | 값을 옮긴 뒤 `terraform plan`이 `No changes`인지 | E-8 |
+| 프라이빗 엔드포인트인데 kubectl/helm 프로바이더를 선언했는가 | `providers.tf`의 프로바이더와 `endpoint_public_access`의 기본값 대조 | E-9 |
+| 채택 태그의 이름 부분이 차트가 만드는 오브젝트 이름과 같은가 | `helm template`으로 Service 이름 확인 | G-3 |
+| 보안그룹이 Service가 발행하는 포트를 전부 열었는가 | `helm template`으로 렌더된 Service의 포트와 SG·파드 쪽 규칙 대조 | G-1 |
+| Service 생성을 막는 컨트롤러 웹훅이 남아 있는가 | `kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook` | G-4 |
 
 ### 목차
 
@@ -123,6 +128,8 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 - E-5. Add-on DaemonSet의 환경변수는 `aws_eks_addon`의 `configuration_values`로 설정 (셸의 `kubectl set env` 대체)
 - E-6. AWS 서비스가 EKS에 접근해야 할 때는 principal이 서비스 연결 역할인지 먼저 확인한다 (Access Entry는 서비스 연결 역할을 지원하지 않음)
 - E-7. `helm_release`의 `set`은 값의 타입을 추론한다 — 문자열이어야 하는 값(annotation/label)에는 `type = "string"`을 entry별로 지정
+- E-8. 컨트롤러가 값을 바꾸는 필드는 `kubectl_manifest`의 `ignore_fields`로 그 경로만 제외한다 (`lifecycle.ignore_changes = [yaml_body]`는 매니페스트 전체를 동결한다)
+- E-9. EKS API 서버의 퍼블릭 엔드포인트가 `false`이면 Kubernetes 리소스는 프로바이더가 아니라 VPC 안의 인스턴스에서 SSM Association으로 만든다
 
 **F. 보안 그룹**
 
@@ -134,6 +141,7 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 - G-1. AWS Load Balancer Controller로 ALB(Ingress)와 NLB(Service)를 만드는 구성 규칙
 - G-2. AWS Load Balancer Controller의 `--enable-backend-security-group`은 변수로 노출하고, `manage-backend-security-group-rules` 애노테이션을 쓰는지로 값을 결정한다
 - G-3. AWS Load Balancer Controller가 만들 ALB/NLB는 Terraform이 미리 만들고 컨트롤러가 채택(adopt)하게 한다
+- G-4. 컨트롤러의 `mservice.elbv2.k8s.aws` 웹훅은 클러스터 전체의 Service 생성을 막는다 — 그것에 의존하는 Service가 없으면 `enableServiceMutatorWebhook`을 끈다
 
 **H. EC2 작업대와 산출물 전달**
 
@@ -976,6 +984,8 @@ resource "aws_ssm_association" "vscode_association_2" {
 
 EC2 안에서 `kubectl`/`helm`을 실행하는 대신 프로바이더 리소스로 선언하는 규칙입니다. **E-1번이 원칙, E-2번이 이 저장소의 실제 구현**이고, E-3·E-4번은 E-2번으로 대체된 형태를 남겨둔 것이므로 그 순서로 읽습니다.
 
+**E-9번은 그 원칙의 유일한 예외**입니다. E-1·E-2번은 프로바이더가 `terraform apply`를 실행하는 기계에서 동작한다는 전제 위에 서 있고, 클러스터의 API 서버가 프라이빗 전용이면 그 전제가 깨집니다. 어느 쪽인지는 `endpoint_public_access` 하나가 결정하므로, 새 EKS 프로젝트를 시작할 때 그 값을 먼저 정하고 E-1·E-2번과 E-9번 중 하나를 고릅니다.
+
 ### E-1. EC2 userdata/SSM Association으로 만들던 쿠버네티스 리소스는 kubernetes/helm 프로바이더로 대체
 
 > **이 규칙은 "무엇을 하지 않는가"를 정합니다.** userdata나 `aws_ssm_association`에서 `kubectl apply`/`helm install`로 리소스를 만들지 않는다는 것이 요지이며, 그것이 여전히 유효합니다.
@@ -983,6 +993,8 @@ EC2 안에서 `kubectl`/`helm`을 실행하는 대신 프로바이더 리소스�
 > **"무엇으로 대체하는가"는 E-2번이 정합니다.** 아래 예시는 Kubernetes 쪽을 `hashicorp/kubernetes`로 적었지만, 이 저장소는 그 프로바이더를 쓰지 않습니다 — 같은 `apply`에서 만든 클러스터에는 `plan` 단계에서 구성이 불가능하기 때문입니다. 타입드 리소스(`kubernetes_namespace`, `kubernetes_cluster_role`, ...)와 `kubernetes_manifest`는 전부 `alekc/kubectl`의 `kubectl_manifest`로 대체됩니다. Helm(`helm_release`)은 이 제약을 받지 않으므로 아래 내용 그대로 유효합니다.
 >
 > 즉 새 코드를 쓸 때는 **E-1번의 판단 + E-2번의 리소스 타입**을 함께 적용합니다.
+>
+> **적용 조건이 하나 있습니다: 클러스터의 API 서버에 프로바이더가 닿을 수 있어야 합니다.** 프로바이더는 `terraform apply`를 실행하는 기계에서 동작하므로, `endpoint_public_access = false`인 클러스터에서는 이 규칙을 적용할 수 없습니다. 그 경우에는 E-9번대로 VPC 안의 인스턴스에서 SSM Association으로 만들며, 그것이 이 규칙의 유일한 예외입니다.
 
 `kubectl apply`, `helm install`을 EC2 인스턴스 안에서 실행하는 셸 스크립트(user_data나 `aws_ssm_association`)로 만들지 않고, `hashicorp/kubernetes`/`hashicorp/helm` 프로바이더 리소스로 직접 선언합니다. 두 프로바이더 모두 `exec` 플러그인으로 `aws eks get-token`을 호출해 EKS 클러스터에 인증합니다 (kubeconfig 파일이나 별도 EC2 불필요).
 
@@ -1165,6 +1177,7 @@ resource "kubectl_manifest" "reschedule_deployment" {
 
 - **부분 매니페스트만 씁니다.** `metadata.name`/`namespace`로 대상을 지목하고 `spec.template.metadata.annotations`만 채웁니다. `kubectl_manifest`는 merge patch로 적용하므로 이미 존재하는 Deployment의 컨테이너·replicas·셀렉터는 건드리지 않습니다. 전체 Deployment를 재선언하면 CoreDNS의 실제 정의를 Terraform이 소유하게 되어, EKS가 애드온으로 관리하는 필드와 싸우게 됩니다.
 - **`timestamp()`는 매 `apply`마다 바뀌므로 `ignore_changes = [yaml_body]`로 최초 1회만 트리거되게 막습니다.** 없으면 apply마다 CoreDNS가 재시작합니다. `kubernetes_annotations`를 쓰던 시절의 `ignore_changes = [template_annotations]`와 목적이 같고 대상 속성만 다릅니다.
+- **여기서 매니페스트 전체를 동결하는 것을 일반화하지 않습니다.** 이것이 맞는 이유는 값이 매 plan마다 바뀌어서 리소스가 최초 1회만 적용되어야 하기 때문입니다. 컨트롤러가 런타임에 특정 필드만 바꾸는 경우(오토스케일러가 옮기는 `spec.replicas` 등)는 목적이 정반대이므로 `ignore_fields`로 그 경로만 제외합니다(E-8번).
 - **리소스가 아니라 `depends_on`이 순서를 만듭니다.** 프로파일이 먼저 존재해야 재생성된 파드가 Fargate에 매칭되므로 `aws_eks_fargate_profile`을 명시적으로 기다립니다(D-1번).
 - 이 기능이 필요 없는 호출자는 `reschedule_deployment_name`을 `null`로 두면 되므로, B-4번 패턴(nullable 변수 + 조건부 리소스)과 동일한 방식입니다.
 - `hashicorp/kubernetes`의 `kubernetes_annotations`에는 `template_annotations`와 `force` 인수가 있어 같은 일을 더 짧게 표현할 수 있지만, 이 저장소는 클러스터와 이 리소스를 같은 `apply`에서 만들기 때문에 그 프로바이더를 쓸 수 없습니다(E-2번).
@@ -1311,6 +1324,235 @@ terraform apply
 - **`terraform import`로 가져오지 않습니다.** 실패한 릴리스를 state에 넣으면 이후 apply가 upgrade로 진행되면서 `has no deployed releases`로 다시 막힙니다. 정상 배포된 적 없는 릴리스는 지우고 새로 설치하는 것이 맞습니다.
 - `atomic = true`(또는 `replace = true`)를 켜면 실패한 릴리스가 자동으로 정리되어 이 상태에 빠지지 않지만, 원인 진단에 필요한 릴리스 히스토리도 함께 사라집니다. 이 저장소는 학습/데모 목적이라 실패 흔적을 남기는 쪽을 택하고 위 수동 복구 절차를 따릅니다.
 - `helm uninstall`은 실패한 리비전이 이미 만들어둔 리소스(ServiceAccount, RBAC, Service 등)까지 지웁니다. **정상 배포된 릴리스에는 쓰지 않습니다** — 이 절차는 `helm history`의 STATUS가 `failed`이고 성공한 리비전이 하나도 없을 때에 한정합니다.
+
+### E-8. 컨트롤러가 값을 바꾸는 필드는 `kubectl_manifest`의 `ignore_fields`로 그 경로만 제외한다 (`lifecycle.ignore_changes = [yaml_body]`는 매니페스트 전체를 동결한다)
+
+매니페스트가 선언한 필드를 클러스터 안의 컨트롤러가 런타임에 바꾸는 경우가 있습니다. 그러면 그 필드에 주인이 둘이 됩니다 — Terraform이 최초 값을 정하고, 컨트롤러가 그 뒤를 가져갑니다.
+
+| 필드 | 최초 값의 주인 | 런타임의 주인 |
+| --- | --- | --- |
+| Deployment의 `spec.replicas` | 매니페스트 | HorizontalPodAutoscaler, 또는 KEDA가 ScaledObject에서 만드는 HPA |
+| Deployment의 `spec.template.spec.containers.<n>.resources` | 매니페스트 | VPA admission controller (`updateMode`가 `Initial`/`Recreate`/`Auto`일 때) |
+| `webhooks.<n>.clientConfig.caBundle` | 매니페스트(빈 값) | cert-manager 등의 CA injector |
+
+아무 처리도 하지 않으면 컨트롤러가 값을 옮긴 직후부터 **모든 `plan`이 그것을 되돌리자고 제안**하고, 그 plan을 apply하면 컨트롤러가 다시 조정할 때까지 워크로드가 원래 값으로 돌아갑니다. 오토스케일러가 5로 올린 레플리카가 1로 내려갔다가 몇십 초 뒤 다시 올라가는 왕복이 생깁니다.
+
+#### `lifecycle.ignore_changes = [yaml_body]`로 해결하지 않습니다
+
+`lifecycle`의 최소 단위는 **속성**이고, `kubectl_manifest`에서 매니페스트 전체는 `yaml_body` 속성 하나입니다. 그 안의 경로를 지목할 방법이 없으므로 `ignore_changes = [yaml_body]`는 이미지·애노테이션·셀렉터·레플리카를 한꺼번에 동결합니다. 실패 방향이 나쁩니다 — 이미지를 바꿔도 클러스터에 반영되지 않고, `plan`은 `No changes`라고 답합니다.
+
+```hcl
+# 이렇게 하지 않습니다. 이미지를 바꿔도 plan이 "No changes"라고 답합니다
+resource "kubectl_manifest" "deployment" {
+  yaml_body = yamlencode({ ... })
+
+  lifecycle {
+    ignore_changes = [yaml_body]
+  }
+}
+```
+
+프로바이더의 `ignore_fields` 인수가 경로 단위로 같은 일을 합니다.
+
+```hcl
+resource "kubectl_manifest" "deployment" {
+  yaml_body = yamlencode({ ... })
+
+  # HPA가 이 Deployment의 레플리카 수를 옮기므로 그 필드만 diff에서 제외합니다.
+  # 이미지·애노테이션·셀렉터는 계속 추적됩니다 (rules.md E-8).
+  ignore_fields = ["spec.replicas"]
+}
+```
+
+#### 경로는 이름이 아니라 루트부터의 전체 경로입니다
+
+- **필드 이름만 적으면 매칭되지 않습니다.** 매칭은 전체 경로와 그 접두사로 이루어지므로 `["caBundle"]`이 아니라 `["webhooks.0.clientConfig.caBundle"]`처럼 씁니다. 업스트림 문서의 예시가 이름만 적은 형태라서 이 오해가 흔합니다([gavinbunney/terraform-provider-kubectl#83](https://github.com/gavinbunney/terraform-provider-kubectl/issues/83)에 정리되어 있습니다. `alekc/kubectl`은 그 코드의 유지보수 포크입니다).
+- **리스트 원소에는 인덱스가 필요하고 와일드카드가 없습니다.** `containers.*.resources`는 쓸 수 없습니다. 컨테이너가 하나면 `containers.0.resources`로 인덱스를 박고, 개수가 가변이면 리스트 전체를 제외하는 것 말고는 표현할 방법이 없습니다.
+- **접두사로 매칭되므로 상위 경로를 적으면 그 아래가 전부 제외됩니다.** 편하지만 그것은 `lifecycle` 전체 동결과 같은 함정을 한 단계 작은 범위에서 되풀이하는 것입니다. `containers`를 제외하면 그 안의 이미지 변경도 추적되지 않으므로, **컨트롤러가 실제로 건드리는 가장 깊은 경로**를 적습니다.
+
+#### 최초 값은 그대로 적용됩니다
+
+`ignore_fields`는 이후의 diff 계산에서 그 경로를 빼는 것이고, 생성 시점에는 `yaml_body`가 그대로 apply됩니다. 그래서 `replicas`에 오토스케일러의 하한을 적어두는 것은 여전히 의미가 있습니다 — 데모가 범위의 맨 아래에서 시작하고, 그 뒤에 늘어난 레플리카는 전부 오토스케일러가 만든 것이 됩니다.
+
+#### E-4번과 혼동하지 않습니다
+
+두 규칙이 같은 문제를 다루는 것처럼 보이지만 판단 기준이 다릅니다.
+
+| 상황 | 쓰는 것 |
+| --- | --- |
+| 컨트롤러가 런타임에 **특정 필드**를 바꾸고, 매니페스트의 나머지는 계속 관리되어야 한다 | `ignore_fields = ["<경로>"]` |
+| 값 자체가 매 plan마다 바뀌어서 리소스가 **최초 1회만** 적용되어야 한다 (`timestamp()`, `bcrypt()`) | `lifecycle { ignore_changes = [yaml_body] }` |
+
+E-4번의 rollout 트리거(`timestamp()`)와 043번 프로젝트의 htpasswd Secret(`bcrypt()`)이 아래 행입니다. 그 둘은 리소스가 한 번 적용된 뒤 다시는 적용되지 않는 것이 목적이므로 전체 동결이 맞습니다. 위 행은 목적이 정반대입니다.
+
+#### 확인하는 방법
+
+**apply 후 두 번째 `plan`이 깨끗한지가 판정입니다.** 컨트롤러가 값을 옮길 시간을 준 뒤 실행합니다.
+
+```bash
+kubectl -n <ns> scale deployment <name> --replicas 5   # 또는 오토스케일러가 옮기기를 기다립니다
+terraform plan                                         # "No changes" 여야 합니다
+```
+
+`plan`이 여전히 그 필드를 되돌리려 하면 경로가 틀린 것입니다. 프로바이더가 무엇과 비교하고 있는지는 state의 `yaml_incluster`에서 확인합니다.
+
+```bash
+terraform state show 'module.<module>.kubectl_manifest.<name>' | grep -A20 'yaml_incluster'
+```
+
+감사할 때는 매니페스트 전체를 동결한 곳을 모두 세고, 각각이 위 표의 아래 행에 해당하는지(`timestamp()`나 `bcrypt()`처럼 값이 매번 바뀌는 사례인지) 확인합니다. 해당하지 않으면 `ignore_fields`로 좁혀야 하는 곳입니다.
+
+```bash
+grep -rln 'ignore_changes *= *\[yaml_body\]' --include='*.tf' .
+```
+
+### E-9. EKS API 서버의 퍼블릭 엔드포인트가 `false`이면 Kubernetes 리소스는 프로바이더가 아니라 VPC 안의 인스턴스에서 SSM Association으로 만든다
+
+**이것이 E-1번의 유일한 예외입니다.** E-1번은 셸에서 `kubectl apply`/`helm install`로 리소스를 만들지 말라고 정하고, E-2번은 그 대안을 `alekc/kubectl`로 정합니다. 두 규칙의 전제는 하나입니다 — **프로바이더는 `terraform apply`를 실행하는 기계에서 동작한다**는 것. 클러스터의 API 서버가 프라이빗 전용이면 그 기계는 API 서버에 닿을 수 없고, 전제가 깨집니다.
+
+| `endpoint_public_access` | Kubernetes 리소스를 만드는 것 | 규칙 |
+| --- | --- | --- |
+| `true` | `kubectl_manifest` / `helm_release` (프로바이더) | E-1·E-2번 (기본) |
+| `false` | 클러스터와 같은 VPC의 인스턴스에서 `aws_ssm_association`이 실행하는 `kubectl`/`helm` | **이 규칙** |
+
+퍼블릭으로 여는 것이 `plan`을 통과하는 유일한 방법이라는 이유로 엔드포인트를 열지 않습니다. 반대로, 프라이빗이 그 프로젝트의 주제가 아니라면 이 규칙을 쓰지 않습니다 — 아래 "무엇을 잃는가"의 비용이 실제로 큽니다. 이 저장소에서 이 형태를 쓰는 것은 `041_eks_private_cluster` 하나뿐입니다.
+
+#### 어느 쪽을 택했는지 `validation`으로 못박습니다
+
+두 형태는 **섞이면 조용히 실패합니다.** 프라이빗 클러스터에 프로바이더를 겨눠도 `plan`은 통과하고, 실패는 `apply` 중에 연결 타임아웃으로 나타납니다. 그 에러는 D-4번이 다루는 "destroy 순서가 틀렸을 때"의 메시지와 모양이 같아서, 순서 문제로 오진하기 쉽습니다. 그래서 `endpoint_public_access`에 그 프로젝트가 택한 값을 고정하는 `validation`을 답니다(B-1번).
+
+```hcl
+# 프라이빗을 택한 프로젝트
+variable "endpoint_public_access" {
+  type        = bool
+  default     = false
+  description = "... 모든 Kubernetes 객체를 배스천의 SSM Association이 만드는 이유가 이 값을 false로 둘 수 있게 하는 것입니다 ..."
+
+  validation {
+    condition     = var.endpoint_public_access == false
+    error_message = "endpoint_public_access must stay false in this variant. The Kubernetes objects are applied by SSM Associations on the bastion rather than by a Terraform provider, so nothing here needs it, and turning it on removes the only thing this project demonstrates."
+  }
+}
+```
+
+```hcl
+# 프로바이더를 택한 프로젝트 - 반대 방향으로 고정합니다
+variable "endpoint_public_access" {
+  type        = bool
+  default     = true
+
+  validation {
+    condition     = var.endpoint_public_access
+    error_message = "endpoint_public_access must be true in this variant, because its manifests are applied by the kubectl provider from the machine running terraform. To run with a private endpoint, apply them from the bastion through an SSM Association instead, as 041_eks_private_cluster does."
+  }
+}
+```
+
+#### 루트는 구성할 수 없는 프로바이더를 선언하지 않습니다
+
+`providers.tf`에 `kubectl`도 `helm`도 두지 않습니다. 이 저장소의 다른 EKS 루트와 다른 유일한 지점이므로, **왜 없는지를 그 파일에 길게 적습니다.** 없는 것은 grep으로 찾을 수 없습니다.
+
+여기서 걸리는 것이 하나 더 있습니다. **`helm_release`를 품은 모듈을 그대로 재사용할 수 없습니다.** 모듈의 `required_providers`에 `helm`이 있으면 Terraform은 루트가 일부러 두지 않은 helm 프로바이더 구성을 요구합니다. 그래서 그런 모듈은 AWS 쪽만 남기고 쪼갭니다 — `041`의 `aws_load_balancer_controller_iam_role`이 그 예로, IRSA 역할만 만들고 `providers.tf`는 `aws`만 선언하며 차트 전용 변수는 제거되어 있습니다. 차트는 SSM 단계가 설치합니다.
+
+`install_chart = false` 같은 토글로 한 모듈을 양쪽에 쓰는 방법은 쓰지 않습니다. 토글이 false여도 모듈이 helm 프로바이더를 **선언**하는 사실은 변하지 않아서, 루트가 갖지 않은 구성을 여전히 요구합니다.
+
+#### 매니페스트는 여전히 HCL 객체로 정의합니다
+
+셸로 넘긴다고 YAML 문자열을 손으로 쓰지 않습니다. E-3번 그대로 HCL 객체로 선언하고 `yamlencode`로 렌더링한 뒤, 그 결과를 heredoc으로 인스턴스에 씁니다. 값은 여전히 타입이 있는 한 곳에서만 정의됩니다.
+
+```hcl
+locals {
+  workload_manifests = [
+    { apiVersion = "apps/v1", kind = "Deployment", metadata = { ... }, spec = { ... } },
+    { apiVersion = "v1", kind = "Service", ... },
+    { apiVersion = "networking.k8s.io/v1", kind = "Ingress", ... },
+  ]
+  # kubectl이 여러 문서를 읽는 방식 그대로 이어붙입니다.
+  workload_yaml = join("\n---\n", [for m in local.workload_manifests : yamlencode(m)])
+}
+```
+
+```hcl
+    commands = <<-EOT
+      set -euo pipefail
+      until [ -f ${var.marker_path}/load_balancer_controller ]; do sleep 10; done
+      sudo -Eu ec2-user bash << 'STEP'
+      set -euo pipefail
+      export HOME=/home/ec2-user
+      export PATH=/home/ec2-user/bin:$PATH
+      mkdir -p /home/ec2-user/manifests
+      cat > /home/ec2-user/manifests/workload.yaml << 'TFMANIFEST'
+      ${local.workload_yaml}
+      TFMANIFEST
+      kubectl apply -f /home/ec2-user/manifests/workload.yaml
+      kubectl -n ${var.workload_namespace} rollout status deployment ${var.workload_name} --timeout=10m
+      STEP
+      touch ${var.marker_path}/workload
+      EOT
+```
+
+- **중첩 heredoc이 동작하는 이유**: `<<-EOT`의 들여쓰기 제거는 **템플릿 소스 줄**만 보고 계산됩니다. 보간된 여러 줄 값의 두 번째 줄부터는 컬럼 0에 놓이고, 제거가 끝난 뒤 종료자도 컬럼 0에 놓입니다. 그래서 `bash << 'STEP'` 안의 `cat << 'TFMANIFEST'`가 의도대로 닫힙니다.
+- **구분자는 인용하고**(`<< 'TFMANIFEST'`) 본문에 나올 수 없는 문자열로 정합니다. 값은 Terraform이 이미 채웠으므로 셸이 `$`나 백틱을 건드릴 이유가 없습니다.
+- **A-4번이 두 배로 중요해집니다.** `.tf`가 CRLF로 저장되면 종료자가 `TFMANIFEST\r`이 되어 heredoc이 파일 끝까지 이어지고 스크립트가 한 줄도 실행되지 않습니다. 이 형태에서는 매니페스트까지 그 안에 들어 있습니다.
+- `rollout status`로 단계가 결과를 기다리게 합니다. `kubectl apply`는 객체를 만들 뿐이고, 기다리지 않으면 다음 단계가 아직 없는 것에 의존할 수 있습니다.
+
+#### 순서는 마커 파일로, 재실행 가능성은 손으로 보장합니다
+
+- 단계 사이의 순서는 `depends_on`이 아니라 마커 파일과 `until` 루프입니다(D-5번). 각 단계는 앞 단계의 마커를 기다리고 자기 마커를 남깁니다.
+- **선택적 단계가 있으면 뒤 단계는 "실제로 실행된" 마커를 기다려야 합니다.** 조건에 따라 기다릴 이름을 바꿉니다.
+
+```hcl
+until [ -f ${var.marker_path}/${var.override_coredns_image ? "coredns_image" : "load_balancer_controller"} ]; do sleep 10; done
+```
+
+- **모든 단계는 재실행 가능해야 합니다.** association은 `parameters`가 바뀌면 다시 실행됩니다. `kubectl apply`는 그 성질을 갖지만 **`helm upgrade --install`은 갖지 않습니다** — 유일한 리비전이 `failed`면 `has no deployed releases`로 거부하면서 원래 실패 원인을 덮습니다. 그 상태만 골라 정리하는 가드를 단계 안에 넣습니다(E-7번).
+- 실패했을 때 스스로 설명하게 만듭니다. `--wait`가 터지면 `Error: context deadline exceeded` 한 줄만 남으므로, 진단 명령을 붙여 그 출력이 association 결과에 들어오게 합니다.
+
+```hcl
+helm upgrade --install ... --wait --timeout ${var.helm_timeout_seconds}s \
+  || { kubectl -n ${var.namespace} get pods -l app.kubernetes.io/name=${var.chart} -o wide; exit 1; }
+```
+
+- helm의 타임아웃은 association의 `wait_for_success_timeout_seconds`보다 **작아야** 합니다. SSM이 먼저 포기하면 아무 설명 없는 `Failed`가 되고, helm이 먼저 포기하면 자기 메시지와 위 진단 출력이 남습니다. 교차 변수 `validation`으로 못박습니다(B-1번).
+
+#### 전제조건
+
+- 인스턴스의 IAM 역할에 클러스터 접근 권한이 있어야 합니다(`aws_eks_access_entry`, C-1번). 없으면 kubectl이 설치돼 있어도 `error: You must be logged in to the server`로 끝납니다.
+- 그 인스턴스는 H-1번의 작업대이므로 kubectl·helm·eksctl이 이미 있습니다. 이 규칙은 그 도구로 **리소스를 만드는** 예외를 허용하는 것이고, H-1번의 "설치되어 있다는 이유로 리소스를 만들지 않는다"는 이 경우에만 뒤집힙니다.
+- 아웃바운드 인터넷이 없는 클러스터라면 이미지 경로도 함께 해결해야 합니다. VPC 엔드포인트와 ECR 풀스루 캐시가 필요하고, **캐시는 첫 pull이 리포지토리를 만들기 때문에 pull하는 주체(노드 역할)에 `ecr:CreateRepository`와 `ecr:BatchImportUpstreamImage`가 있어야 합니다.** `AmazonEC2ContainerRegistryReadOnly`에는 둘 다 없고, 없을 때 ECR은 권한 오류가 아니라 `not found`로 답하므로 이미지 경로 오타처럼 보입니다. `aws ecr describe-repositories`가 빈 목록인데 파드가 `ImagePullBackOff`면 이것입니다.
+
+#### 무엇을 잃는가
+
+정직하게 적어둡니다. 이것이 기본이 아닌 이유입니다.
+
+- **Kubernetes 객체가 Terraform state에 없습니다.** `plan`에 diff가 없고, 드리프트가 감지되지 않으며, `terraform output`으로 확인할 수 있는 것도 없습니다. 무엇이 적용되었는지는 클러스터에 물어봐야만 알 수 있습니다.
+- **D-4번이 적용되지 않습니다.** Terraform이 지울 것이 없으므로 destroy 순서를 잡을 대상도 없습니다. 대신 **반대 위험이 생깁니다**: 워크로드 매니페스트가 Terraform 리소스가 아니므로 `terraform destroy`는 Ingress/Service를 먼저 지우지 않고 클러스터를 내리고, 컨트롤러가 만든 로드밸런서가 고아로 남을 수 있습니다. 로드밸런서를 미리 만들어 채택시키는 G-3번 패턴이 이 위험을 로드밸런서에 한해 줄여줍니다.
+- **모든 값이 셸을 한 번 통과합니다.** 인용, 줄바꿈, `$`가 전부 표면이 됩니다.
+- **실패 메시지가 한 단계 멀어집니다.** association은 `unexpected state 'Failed'`만 알려줍니다. 원인은 A-4번의 절차(`describe-association-executions` → `describe-association-execution-targets` → `get-command-invocation`)로 꺼내야 하고, 그 출력의 `ExecutionElapsedTime`이 `0.0x`초면 명령이 실행된 것이 아니라 파싱에서 실패한 것입니다.
+
+#### 확인하는 방법
+
+프라이빗 엔드포인트를 택한 루트가 프로바이더도 선언하고 있으면 그것이 위반입니다.
+
+```bash
+# provider 블록만 봅니다. required_providers의 선언이나 주석의 이름이 아니라,
+# "구성된 프로바이더"가 있다는 것이 곧 API 서버에 닿아야 한다는 뜻이기 때문입니다 -
+# 프로바이더 이름을 본문에서 grep하면 설명 주석까지 걸려 거짓 양성이 납니다.
+for d in */ */*/; do
+  [ -f "$d/providers.tf" ] || continue
+  default=$(awk '/variable "endpoint_public_access"/,/^}/' "$d/variables.tf" 2>/dev/null \
+    | grep -m1 'default' | grep -oE 'true|false')
+  [ "$default" = "false" ] || continue
+  blocks=$(grep -cE '^provider "(kubectl|helm|kubernetes)"' "$d/providers.tf")
+  [ "$blocks" -gt 0 ] && echo "conflict: ${d%/} declares $blocks provider block(s)"
+done
+```
+
+반대로 SSM 형태를 택한 루트에서는 각 단계가 마커를 남기는지, 그리고 마지막 단계까지 사슬이 끊기지 않는지 셉니다. `until`의 개수와 `touch`의 개수가 맞지 않으면 어딘가 기다리지 않거나 남기지 않습니다.
+
+```bash
+grep -c 'until \[ -f' main.tf; grep -c 'touch .*marker_file_path' main.tf
+```
 
 ## F. 보안 그룹
 
@@ -1537,6 +1779,69 @@ NLB의 타깃 타입만 `nlb-`가 붙는 점에 주의합니다(컨트롤러 소
 - `manage-backend-security-group-rules: "true"`를 붙이면 컨트롤러가 노드 규칙을 쓰고, `--enable-backend-security-group=true`가 **필수**입니다.
 - 애노테이션을 붙이지 않으면 `false`로 둘 수 있고, 노드 측 규칙은 Terraform이 직접 선언합니다(`target-type: ip` 한정).
 - 컨트롤러가 규칙을 추가하는 보안그룹에는 인라인 `ingress`/`egress`를 쓰지 않고 독립 규칙 리소스를 쓰며 `revoke_rules_on_delete = true`를 켭니다(**F-2번 패턴**).
+
+#### 보안그룹은 Service가 발행하는 포트 **전부**를 열어야 한다
+
+Service가 발행하는 포트마다 컨트롤러가 리스너를 하나씩 만듭니다. 열어야 할 곳이 두 군데이고, 빠뜨렸을 때의 증상이 서로 다릅니다.
+
+| 열 곳 | 무엇을 | 빠뜨리면 |
+| --- | --- | --- |
+| 프론트엔드 SG | 클라이언트 → 리스너 포트 | 그 포트는 **거부가 아니라 타임아웃**이 됩니다 |
+| 파드 쪽 SG(보통 클러스터 SG) | 로드밸런서 → 컨테이너 포트 | 리스너는 붙지만 타깃이 전부 unhealthy |
+
+`ingress-nginx` 차트가 대표적입니다. 기본값이 `controller.service.ports.http = 80`과 `controller.service.ports.https = 443`이라 Service는 **항상 두 포트를 발행**하고, 로드밸런서에도 리스너가 2개 생깁니다. 80만 열어두면 https가 조용히 막힙니다.
+
+**워크로드가 https로 리다이렉트하면 증상이 한 단계 뒤로 밀립니다.** `http://host`는 80으로 들어가 정상적으로 308을 받고, 브라우저가 그 `Location`(443)으로 이동하면서 비로소 멈춥니다. 80이 열려 있다는 사실이 "로드밸런서는 살아 있다"는 오해를 만들기 때문에, 포트가 아니라 인증서나 워크로드를 먼저 의심하게 됩니다.
+
+그래서 포트는 한 곳에서 정의해 **Service·프론트엔드 SG·파드 쪽 규칙 세 군데에 같은 값을 전달합니다**(B-5번 패턴). 셋이 따로 있으면 어긋나고, 어긋난 것을 apply는 알려주지 않습니다. 맵으로 두면 `for_each`의 키가 규칙 설명에 그대로 드러납니다.
+
+```hcl
+# 루트 variables.tf - 차트가 쓰는 이름을 키로 씁니다
+variable "load_balancer_ports" {
+  type = map(number)
+  default = {
+    http  = 80
+    https = 443
+  }
+
+  validation {
+    # 제약이 값의 모양이 아니라 워크로드가 필요로 하는 것에 관한 것이면 validation에 둡니다 (B-1번)
+    condition     = contains(keys(var.load_balancer_ports), "https")
+    error_message = "load_balancer_ports must include https, because the dashboard URL this project outputs is https and apply succeeds either way."
+  }
+}
+```
+
+```hcl
+# 루트 main.tf - 같은 맵이 세 곳으로 갑니다
+module "load_balancer_security_group" { ports         = var.load_balancer_ports }
+module "ingress_nginx"                 { service_ports = var.load_balancer_ports }
+
+resource "aws_vpc_security_group_ingress_rule" "load_balancer_to_pods" {
+  for_each          = var.load_balancer_ports
+  security_group_id = module.eks_cluster.cluster_security_group_id
+  description       = "Ingress controller ${each.key} port from the NLB"
+  ip_protocol       = "tcp"
+  from_port         = each.value
+  to_port           = each.value
+  ...
+}
+```
+
+- **`controller.service.port`는 그 차트에 없는 값입니다.** helm은 모르는 값을 거부하지 않으므로 `--set`이 성공하고 Service는 차트 기본값을 그대로 씁니다. 즉 포트를 바꾼 줄 알았는데 아무 일도 일어나지 않고, 보안그룹만 그 값에 맞춰 좁혀집니다. 올바른 경로는 `controller.service.ports.<name>`입니다.
+
+값 이름이 맞는지는 `values.yaml`을 읽는 것보다 **렌더된 Service를 보는 쪽이 확실합니다.** 오타 난 값은 조용히 버려지므로 `--set`을 준 채로 렌더해서, 나온 포트가 의도한 것인지 확인합니다. 그것이 보안그룹이 열어야 하는 목록입니다.
+
+```bash
+helm template <release> <repo>/<chart> --version <v> --kube-version 1.33.0 \
+  --set controller.service.type=LoadBalancer \
+  | awk '/^kind: Service$/,/^---$/' | grep -E '^  name:|^    - name:|      port:'
+#   name: ingress-nginx-controller
+#     - name: http
+#       port: 80
+#     - name: https
+#       port: 443
+```
 
 #### 로드밸런서는 Terraform 리소스가 아니다
 
@@ -1836,6 +2141,67 @@ module "synced_alb" {
 
 - **`alb.ingress.kubernetes.io/group.name`을 쓰면 `stack` 값이 달라집니다.** 명시적 IngressGroup의 스택 ID는 `<namespace>/<name>`이 아니라 **그룹 이름 하나**입니다. 기존 Ingress에 이 애노테이션을 추가하면 컨트롤러가 로드밸런서를 새로 만드는 이유가 이것입니다(업스트림 [#2271](https://github.com/kubernetes-sigs/aws-load-balancer-controller/issues/2271)). 워크로드가 `group.name`을 쓰는 구성이라면 `stack`도 그 그룹 이름을 내보내야 하고, 그 파생 역시 워크로드 모듈이 책임집니다.
 
+#### 이름 부분은 차트의 naming 템플릿에서 유도한다 (릴리스 이름에 차트 이름을 붙여 쓰지 않는다)
+
+`stack`의 뒷부분은 Service나 Ingress의 이름이고, 그 오브젝트를 차트가 만든다면 **이름을 정하는 것도 차트입니다.** 릴리스 이름 뒤에 차트 이름을 붙이는 식으로 짐작하면 틀립니다. `ingress-nginx`의 `_helpers.tpl`이 그 예입니다.
+
+```gotemplate
+{{- define "ingress-nginx.fullname" -}}
+{{- if .Values.fullnameOverride -}}{{- .Values.fullnameOverride -}}
+{{- else -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- if contains $name .Release.Name -}}{{- .Release.Name -}}
+{{- else -}}{{- printf "%s-%s" .Release.Name $name -}}
+```
+
+릴리스 이름이 차트 이름을 **포함하면 중복이 접힙니다.** 그래서 같은 규칙이 릴리스 이름에 따라 다른 답을 냅니다.
+
+| 릴리스 이름 | 컨트롤러 Service 이름 |
+| --- | --- |
+| `ingress-nginx` | `ingress-nginx-controller` |
+| `foo` | `foo-ingress-nginx-controller` |
+
+`"${release}-ingress-nginx-controller"`로 적어두면 기본 릴리스 이름에서 `ingress-nginx-ingress-nginx-controller`가 됩니다. 그런 Service는 존재하지 않으므로 태그는 아무것과도 매칭되지 않고, **컨트롤러는 자기 로드밸런서를 따로 만듭니다.** 미리 만든 쪽에는 리스너가 하나도 붙지 않는데 하필 output과 워크로드의 hostname이 가리키는 것이 그쪽이어서, 증상은 "apply는 성공했는데 주소가 아무 응답도 하지 않는다"가 됩니다.
+
+`contains` 판정을 Terraform에서 재현하지 않습니다. **`fullnameOverride`로 이름을 고정하면** 추론이 사라지고 Service 이름이 릴리스 이름의 순수 함수가 됩니다. 기본 릴리스 이름에서는 결과가 같으므로 기존 리소스가 개명되지도 않습니다.
+
+```hcl
+# 차트를 설치하는 모듈
+set = concat([
+  {
+    name  = "fullnameOverride"
+    value = var.release_name
+    # 전부 숫자인 릴리스 이름은 number로 추론되어 차트의 trunc가 렌더에 실패합니다 (E-7번).
+    type = "string"
+  },
+  ...
+```
+
+```hcl
+# 루트 - 짐작이 아니라 규칙입니다
+ingress_service_name = "${var.ingress_release_name}-controller"
+ingress_stack_tag    = "${var.ingress_namespace}/${local.ingress_service_name}"
+```
+
+그리고 호출자가 넘긴 이름이 릴리스 이름과 어긋나는 것을 `validation`으로 세웁니다. 이 어긋남은 아무 에러도 내지 않으므로, plan에서 잡지 않으면 드러나는 곳이 "로드밸런서가 2개"뿐입니다(B-1번).
+
+```hcl
+variable "service_name" {
+  # 조합에 관한 제약이므로 교차 참조가 맞는 표현입니다
+  validation {
+    condition     = var.service_name == "${var.release_name}-controller"
+    error_message = "service_name must be \"<release_name>-controller\" - the chart names the controller Service after its fullname, which this release pins to release_name via fullnameOverride. Passing anything else silently breaks load balancer adoption rather than failing (rules.md G-3)."
+  }
+}
+```
+
+- **`ingress-nginx`에 한정된 이야기가 아닙니다.** 차트가 만드는 오브젝트의 이름을 Terraform 쪽에서 맞춰야 할 때는 이름을 짐작하지 말고 렌더해서 확인합니다.
+
+```bash
+helm template <release> <repo>/<chart> --version <v> --kube-version 1.33.0 \
+  | grep -E '^kind:|^  name:' | paste - - | grep Service
+```
+
 #### 태그 외에 반드시 일치해야 하는 것
 
 태그가 맞아 채택 대상이 되더라도, 컨트롤러가 계산한 로드밸런서 명세와 실제 로드밸런서가 **재생성 없이는 맞출 수 없는 항목**에서 어긋나면 채택이 성립하지 않습니다.
@@ -2026,6 +2392,116 @@ terraform output synced_load_balancer_url
 ```bash
 kubectl -n kube-system logs deploy/aws-load-balancer-controller --tail 100
 kubectl -n <ns> describe ingress <name>   # 또는 describe service
+```
+
+### G-4. 컨트롤러의 `mservice.elbv2.k8s.aws` 웹훅은 클러스터 전체의 Service 생성을 막는다 — 그것에 의존하는 Service가 없으면 `enableServiceMutatorWebhook`을 끈다
+
+`aws-load-balancer-controller` 차트는 Service를 가로채는 mutating 웹훅을 기본으로 설치합니다. 하는 일은 하나입니다 — `type: LoadBalancer` Service에 `spec.loadBalancerClass`를 주입해서 이 컨트롤러가 기본 처리자가 되게 하는 것. 그런데 **그 대상 범위가 클러스터 전체입니다.**
+
+```yaml
+failurePolicy: Fail
+name: mservice.elbv2.k8s.aws
+rules:
+- apiGroups: [""]
+  apiVersions: [v1]
+  operations: [CREATE]
+  resources: [services]
+```
+
+`namespaceSelector`가 아예 없고, `objectSelector`의 유일한 제외 조건은 컨트롤러 자신의 `app.kubernetes.io/name` 라벨입니다(차트가 자기 Service에서 교착되지 않으려고 넣은 것). 따라서 `aws-load-balancer-webhook-service`에 **Ready 파드가 없는 동안에는 어느 네임스페이스에서든 Service를 만들 수 없습니다.**
+
+```
+Internal error occurred: failed calling webhook "mservice.elbv2.k8s.aws": failed to call webhook:
+Post "https://aws-load-balancer-webhook-service.kube-system.svc:443/mutate-v1-service?timeout=10s":
+no endpoints available for service "aws-load-balancer-webhook-service"
+```
+
+**이 창은 예외 상황이 아니라 매 apply마다 열립니다.** 웹훅 오브젝트는 컨트롤러 릴리스 설치 중에 등록되는데 그 Deployment가 Available이 되기 전이고, 이후에도 컨트롤러 롤아웃이나 노드 교체마다 다시 열립니다. 그 사이에 Service를 만드는 다른 차트가 실패하며, 에러는 그 차트가 아니라 이 웹훅의 이름을 답니다 — 원인에서 한참 먼 곳을 가리킵니다.
+
+#### 이 저장소는 이 웹훅에 의존하지 않는다
+
+G-1번이 Service로 NLB를 만들 때 `aws-load-balancer-type: "external"`을 **반드시** 붙이라고 정하고 있고, 그 애노테이션이 있으면 컨트롤러는 웹훅 없이도 그 Service를 가져갑니다. 즉 웹훅이 기여하는 것은 "애노테이션을 깜빡한 Service도 주워 준다"뿐이고, 이 저장소에는 그런 Service가 없습니다. 그래서 켜 둘 이유가 없습니다.
+
+끄기 전에 확인할 것은 하나입니다: **애노테이션(또는 `spec.loadBalancerClass`) 없이 `type: LoadBalancer`인 Service가 있는지.** 있다면 끄는 순간 in-tree 클라우드 프로바이더가 그것을 가져가 Classic Load Balancer를 만들고, 프론트엔드 SG와 타깃 타입 애노테이션은 통째로 무시됩니다(G-1번의 첫 표와 같은 실패). 그 경우에는 웹훅을 끄는 대신 애노테이션을 붙입니다.
+
+애노테이션 키가 `local.annotation_prefix`처럼 조립되는 경우가 있어 리터럴로 grep하면 0건이 나옵니다. 조립된 이름까지 찾습니다.
+
+```bash
+grep -rn 'annotation_prefix}-type\|aws-load-balancer-type' --include='*.tf' . | grep -v _monolithic
+```
+
+#### bool로 렌더링되어야 한다
+
+차트의 가드가 `{{- if .Values.enableServiceMutatorWebhook }}`로 **단순 truthiness**입니다. Go 템플릿에서 비어 있지 않은 문자열은 참이므로, 문자열 `"false"`는 웹훅을 **그대로 남기면서** 끈 것처럼 보입니다. `type = "string"`을 붙이지 않습니다(E-7번).
+
+```hcl
+{
+  name  = "enableServiceMutatorWebhook"
+  value = tostring(var.enable_service_mutator_webhook)
+  # type을 지정하지 않습니다 - auto 추론이 bool을 만들어야 합니다
+},
+```
+
+```bash
+helm template alb eks/aws-load-balancer-controller --set clusterName=x \
+  --set enableServiceMutatorWebhook=false | grep -c mservice.elbv2.k8s.aws
+# 0 이면 정상. --set-string 이었다면 1이 나옵니다
+```
+
+#### 모듈 기본값은 차트를 따르고, 루트가 끈다
+
+G-2번의 `enable_backend_security_group`과 같은 이유입니다. 모듈은 호출자의 워크로드에 `type: LoadBalancer` Service가 있는지 볼 수 없으므로 판단을 루트에 넘깁니다. 모듈 기본값은 차트 기본값인 `true`, 루트는 `false`를 넘기며 `validation`으로 못박습니다(B-1번).
+
+```hcl
+# 루트 variables.tf
+variable "enable_service_mutator_webhook" {
+  type    = bool
+  default = false
+
+  validation {
+    condition     = var.enable_service_mutator_webhook == false
+    error_message = "enable_service_mutator_webhook must stay false in this variant. No Service here relies on the webhook, while its failurePolicy: Fail applies to every Service created in the cluster and fails any release installing Services while the controller has no Ready pod. To run with it true, order every module that creates a Service after module.aws_load_balancer_controller, and note that only covers the apply, not a later controller rollout (rules.md G-4)."
+  }
+}
+```
+
+#### `depends_on`으로 해결하지 않습니다
+
+Service를 만드는 모듈마다 `depends_on = [module.aws_load_balancer_controller]`를 달면 apply는 통과합니다. 그래도 이 방법을 쓰지 않습니다.
+
+- **apply만 덮습니다.** 컨트롤러 롤아웃·노드 교체 중에, 또는 나중에 사람이 code-server에서 Service를 하나 만들 때 같은 실패가 그대로 돌아옵니다.
+- **관계없는 모듈이 직렬화됩니다.** KEDA와 로드밸런서 컨트롤러는 서로 아무 상관이 없는데 순서가 생깁니다.
+- **살아남은 이유가 우연이 됩니다.** 실제로 이 저장소의 `040`·`042`·`043`은 모니터링 차트가 `ingress_nginx` 뒤에 있어서(그 `depends_on`은 웹훅과 무관한 이유로 붙은 것입니다) 실패하지 않고 있었을 뿐입니다. 그 사슬을 정리하면 조용히 깨집니다.
+
+순서가 필요한 것은 `Ingress`를 만드는 모듈입니다. 그쪽은 `vingress`/`mingress` 웹훅이 처리하므로 G-1번대로 컨트롤러 뒤에 둡니다. 이 규칙이 제거하는 것은 **Service에 걸린 전역 게이트**뿐입니다.
+
+#### 남는 웹훅
+
+끈 뒤에도 컨트롤러의 나머지 웹훅은 그대로입니다. Ingress reconcile에는 영향이 없습니다.
+
+| 웹훅 | 대상 | `failurePolicy` |
+| --- | --- | --- |
+| `mpod.elbv2.k8s.aws` | pods | `Ignore`, 그리고 `elbv2.k8s.aws/pod-readiness-gate-inject=enabled` 네임스페이스 한정 |
+| `mservice.elbv2.k8s.aws` | **services (전체)** | `Fail` → 이 규칙이 끄는 대상 |
+| `mtargetgroupbinding` / `vtargetgroupbinding` | targetgroupbindings | `Fail` |
+| `mingress` / `vingress` | ingresses | `Fail` |
+
+#### 확인하는 방법
+
+```bash
+# 클러스터에 남아 있는지 - mservice가 나오면 켜져 있습니다
+kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook \
+  -o jsonpath='{range .webhooks[*]}{.name}{"  "}{.failurePolicy}{"\n"}{end}'
+
+# 컨트롤러와 다른 차트가 병렬로 설치되는 루트를 찾습니다. depends_on을 전이적으로
+# 따라가야 합니다 - 직접 참조만 보면 사슬로 안전한 모듈을 위반으로 오판합니다
+grep -rn 'enableServiceMutatorWebhook' --include='*.tf' . | grep -v _monolithic
+```
+
+실패했을 때 원인을 확정하는 것은 릴리스 히스토리입니다. Terraform state에는 남지 않으므로 클러스터에 물어봅니다(E-7번).
+
+```bash
+helm history <release> -n <ns>   # STATUS=failed, DESCRIPTION에 웹훅 이름이 그대로 나옵니다
 ```
 
 ## H. EC2 작업대와 산출물 전달

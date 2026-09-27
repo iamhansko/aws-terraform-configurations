@@ -29,7 +29,7 @@ resource "random_uuid" "stack_id" {}
 # --- Parameters ---
 variable "inbound_from_anywhere" {
   type        = string
-  default     = "False"
+  default     = "True"
   description = "SecurityGroup Inbound Rule (Source 0.0.0.0/0)"
   validation {
     condition     = contains(["True", "False"], var.inbound_from_anywhere)
