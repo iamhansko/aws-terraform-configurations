@@ -9,6 +9,11 @@ module "network" {
 module "key_pair" {
   source   = "./modules/key_pair"
   key_name = "${var.prefix}-key"
+
+  # module.network's value references only order this after the specific aws_subnet or
+  # aws_vpc that produced them, not after the NAT gateway and route tables the network
+  # module also owns. depends_on states "after the whole network" (rules.md D-3).
+  depends_on = [module.network]
 }
 
 module "eks_cluster" {
@@ -32,7 +37,8 @@ module "eks_vpc_cni_addon" {
   # vpc-cni is a DaemonSet and becomes ACTIVE with zero nodes, so it only
   # needs the cluster (rules.md C-4) and is created before any node
   # capacity (eks_fargate_profile/karpenter) exists.
-  depends_on = [module.eks_cluster]
+  depends_on = [
+  module.network, module.eks_cluster]
 }
 
 module "eks_kube_proxy_addon" {
@@ -43,7 +49,8 @@ module "eks_kube_proxy_addon" {
   # kube-proxy is a DaemonSet and becomes ACTIVE with zero nodes, so it
   # only needs the cluster (rules.md C-4) and is created before any node
   # capacity (eks_fargate_profile/karpenter) exists.
-  depends_on = [module.eks_cluster]
+  depends_on = [
+  module.network, module.eks_cluster]
 }
 
 module "eks_fargate_profile" {
@@ -57,7 +64,8 @@ module "eks_fargate_profile" {
   # vpc-cni/kube-proxy must be running before workloads (including
   # coredns, once it's scheduled onto this profile) can rely on pod
   # networking (rules.md C-4).
-  depends_on = [module.eks_vpc_cni_addon, module.eks_kube_proxy_addon]
+  depends_on = [
+  module.network, module.eks_vpc_cni_addon, module.eks_kube_proxy_addon]
 }
 
 module "eks_coredns_addon" {
@@ -68,7 +76,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave
   # DEGRADED and become ACTIVE; that capacity is the kube-system Fargate
   # profile, which must exist first (rules.md C-4).
-  depends_on = [module.eks_fargate_profile]
+  depends_on = [
+  module.network, module.eks_fargate_profile]
 }
 
 module "karpenter" {
@@ -80,7 +89,8 @@ module "karpenter" {
 
   # The Karpenter controller pod needs coredns ACTIVE to resolve DNS and
   # reach the EKS API (rules.md D-2, #28).
-  depends_on = [module.eks_coredns_addon]
+  depends_on = [
+  module.network, module.eks_coredns_addon]
 }
 
 module "vscode_ec2" {
@@ -93,6 +103,9 @@ module "vscode_ec2" {
 
   vpc_id    = module.network.vpc_id
   subnet_id = module.network.public_subnet_a_id
+  # The marker the README association below waits on, written as the last line of user data
+  # (rules.md B-4/D-5).
+  marker_file_path = var.marker_file_path
 
   additional_user_data = <<-EOT
     su - ec2-user << 'EOF'
@@ -158,4 +171,116 @@ module "batch" {
   security_group_ids               = [module.eks_cluster.cluster_security_group_id]
   key_name                         = module.key_pair.key_name
   name_prefix                      = var.prefix
+
+  # module.network's value references only order this after the specific aws_subnet or
+  # aws_vpc that produced them, not after the NAT gateway and route tables the network
+  # module also owns. depends_on states "after the whole network" (rules.md D-3).
+  depends_on = [module.network]
+}
+
+locals {
+  # Every output this project exposes, defined once. outputs.tf projects these and the README below
+  # renders them, so no value expression is written twice (rules.md B-5/H-2). Adding an entry here is
+  # what makes an output possible, which is what keeps the README from falling behind outputs.tf.
+  outputs = {
+    vscode = {
+      order       = 1
+      title       = "code-server"
+      description = "Open the IDE here and run every command below from its terminal. kubectl, eksctl and helm are already installed and the kubeconfig already points at the cluster"
+      value       = "http://${module.vscode_ec2.public_ip}:8000"
+    }
+    eks_cluster_name = {
+      order       = 2
+      title       = "EKS cluster name"
+      description = "Name of the EKS cluster AWS Batch submits jobs into"
+      value       = module.eks_cluster.cluster_name
+    }
+    eks_cluster_endpoint = {
+      order       = 3
+      title       = "EKS cluster endpoint"
+      description = "API server endpoint of the EKS cluster"
+      value       = module.eks_cluster.cluster_endpoint
+    }
+    batch_job_queue_arn = {
+      order       = 4
+      title       = "Batch job queue"
+      description = "The queue a submitted job lands in. Its compute environment is the EKS cluster, so a job here becomes a pod rather than an EC2 instance"
+      value       = module.batch.job_queue_arn
+    }
+    batch_job_definition_arn = {
+      order       = 5
+      title       = "Batch job definition"
+      description = "What a submitted job runs. The namespace it targets has to exist and carry the RBAC the Batch service-linked role is mapped to, which is what the batch module creates"
+      value       = module.batch.job_definition_arn
+    }
+    submit_job_command = {
+      order       = 6
+      title       = "1. Submit a job"
+      description = "Names the queue and definition above. A job stuck in RUNNABLE usually means the namespace mapping is missing rather than that there is no capacity"
+      value       = "aws batch submit-job --job-name batch-on-eks-demo --job-queue ${module.batch.job_queue_arn} --job-definition ${module.batch.job_definition_arn}"
+    }
+    job_status_command = {
+      order       = 7
+      title       = "2. Watch the job"
+      description = "SUBMITTED to RUNNABLE to STARTING to RUNNING to SUCCEEDED. Anything that stops at RUNNABLE is a placement problem, and the reason is in the queue's status reason rather than in the pod"
+      value       = "aws batch list-jobs --job-queue ${module.batch.job_queue_arn} --query 'jobSummaryList[].[jobName,status,statusReason]' --output table"
+    }
+    job_pod_command = {
+      order       = 8
+      title       = "3. Find the pod it became"
+      description = "AWS Batch creates the pod itself, so it is not declared anywhere in this configuration. It appears in the namespace the job definition names"
+      value       = "kubectl -n ${module.batch.namespaces[0]} get pods -o wide"
+    }
+    namespace_rbac_command = {
+      order       = 9
+      title       = "The namespace mapping Batch needs"
+      description = "AWS Batch reaches the cluster as AWSServiceRoleForBatch, a service-linked role. Access entries do not accept those, so the mapping is in the aws-auth ConfigMap instead (rules.md E-6) - and the ARN in it has its path stripped, which the IAM authenticator requires"
+      value       = "kubectl -n kube-system get configmap aws-auth -o jsonpath='{.data.mapRoles}{\"\\n\"}'"
+    }
+    update_kubeconfig_command = {
+      order       = 10
+      title       = "Re-point kubectl"
+      description = "User data already ran this, so kubectl works out of the box. Re-run it if the kubeconfig is ever lost"
+      value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks_cluster.cluster_name}"
+    }
+  }
+  # Iterating local.outputs directly would order sections by key. Re-keying by the order field and
+  # taking values() sorts by that instead - values() returns a map's values ordered by key - so the
+  # README reads in the order the demo is run.
+  readme_ordered = values({
+    for key, entry in local.outputs : format("%02d-%s", entry.order, key) => entry
+  })
+  readme_body = join("\n", concat(
+    ["# ${var.prefix}", ""],
+    flatten([for entry in local.readme_ordered : [
+      "## ${entry.title}", "", entry.description, "", "```", entry.value, "```", "",
+    ]]),
+  ))
+}
+
+# The work happens inside code-server in a browser, where "terraform output" does not exist, so every
+# output above is also written to a README in the home directory the IDE opens (rules.md H-2).
+resource "aws_ssm_association" "vscode_readme" {
+  name                             = "AWS-RunShellScript"
+  wait_for_success_timeout_seconds = var.readme_timeout_seconds
+  targets {
+    key    = "InstanceIds"
+    values = [module.vscode_ec2.instance_id]
+  }
+  parameters = {
+    # The until loop, not depends_on, is what orders this after the instance bootstrap - the marker is
+    # written as the last line of user data (rules.md D-5).
+    #
+    # SSM runs as root, hence the chown. The heredoc delimiter is quoted and deliberately unlikely to
+    # appear in the body: Terraform has already substituted every value, so the shell has no reason to
+    # touch a "$" or a backtick in the README - and the commands in it contain both.
+    commands = <<-EOT
+      until [ -f ${module.vscode_ec2.marker_file_path}/userdata ]; do sleep 10; done
+      cat > /home/ec2-user/README.md << 'TFREADME'
+      ${local.readme_body}
+      TFREADME
+      chown ec2-user:ec2-user /home/ec2-user/README.md
+      touch ${module.vscode_ec2.marker_file_path}/vscode_readme
+      EOT
+  }
 }

@@ -50,10 +50,15 @@ variable "service_account_name" {
   }
 }
 
+variable "create_controller_policy" {
+  type        = bool
+  default     = true
+  description = "Whether this module creates Karpenter's least-privilege controller policy and attaches it. On, because that is what the _monolithic template carried as an inline policy - and the alternative that looks simpler, attaching AdministratorAccess, gives a controller that can already launch and terminate instances the run of the whole account. Set false only to supply a policy of your own through controller_policy_arns"
+}
 variable "controller_policy_arns" {
   type        = list(string)
-  default     = ["arn:aws:iam::aws:policy/AdministratorAccess"]
-  description = "IAM managed policy ARNs attached to the Karpenter controller's IAM role"
+  default     = []
+  description = "Additional managed policy ARNs attached to the controller's IRSA role, on top of the least-privilege policy this module creates. Empty by default: the created policy already covers everything Karpenter does, and anything added here widens it"
 
   validation {
     condition     = alltrue([for arn in var.controller_policy_arns : can(regex("^arn:aws:iam::", arn))])
@@ -111,4 +116,14 @@ variable "controller_memory_limit" {
   type        = string
   default     = "1Gi"
   description = "Memory limit for the Karpenter controller pod"
+}
+variable "interruption_queue_arn" {
+  type        = string
+  default     = null
+  description = "ARN of the interruption queue, used to scope the controller's sqs:ReceiveMessage and sqs:DeleteMessage to that one queue. Taken separately from interruption_queue_name rather than derived from it, because deriving the ARN would put a second, independent definition of the queue's identity in this module (rules.md B-5)"
+
+  validation {
+    condition     = var.interruption_queue_arn == null || can(regex("^arn:aws:sqs:", var.interruption_queue_arn))
+    error_message = "interruption_queue_arn must be an SQS queue ARN, or null."
+  }
 }

@@ -118,7 +118,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and become
   # ACTIVE, so it comes after the node group rather than before it (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The agent this project exists for. It reports node conditions - the six in
 # var.scenarios among them - and the managed node group's node_repair_config is what
@@ -131,7 +132,8 @@ module "eks_node_monitoring_agent_addon" {
 
   # The agent runs as a DaemonSet, so it needs nodes to run on before it reports
   # anything (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Ships the agent's own log to a per-cluster CloudWatch log group, which is how a
 # detected condition is readable without kubectl.
@@ -146,7 +148,8 @@ module "eks_cloudwatch_observability_addon" {
   # (rules.md D-1).
   pod_identity_agent_dependency = module.eks_pod_identity_agent_addon[each.key].pod_identity_agent_addon_arn
 
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # One role shared by all six clusters' CloudWatch agents. Pod Identity scopes it per
 # cluster through the association, so a single role is enough - and the _monolithic
@@ -221,6 +224,9 @@ module "vscode_ec2" {
     EOF
   EOT
 
+# module.network's value references only order this after the specific aws_subnet or
+# aws_vpc that produced them, not after the NAT gateway and route tables the network
+# module also owns. depends_on states "after the whole network" (rules.md D-3).
 depends_on = [module.network]
 }
 # Granting the bastion's role access to every cluster joins modules that know nothing

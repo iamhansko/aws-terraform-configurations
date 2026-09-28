@@ -62,7 +62,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Not optional here. The VPA recommender reads usage from the metrics API, so without
 # this the VerticalPodAutoscaler's status stays empty and nothing is ever recommended
@@ -77,7 +78,8 @@ module "eks_metrics_server_addon" {
 
   # Also a Deployment, so it needs node capacity for the same reason as coredns
   # (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The variant. Three components - recommender, updater, admission controller - plus
 # the CRD, installed as a pinned chart rather than by cloning kubernetes/autoscaler
@@ -94,7 +96,8 @@ module "vertical_pod_autoscaler" {
   # The release has wait = true, so the apply blocks until its Deployments are
   # Available - which needs node capacity. The admission controller's certificate
   # comes from a pre-install hook Job, which also has to be able to run somewhere.
-  depends_on = [module.eks_node_group, module.eks_metrics_server_addon]
+  depends_on = [
+  module.network, module.eks_node_group, module.eks_metrics_server_addon]
 }
 # The workload the VPA resizes: the upstream hamster example, a container that asks
 # for less CPU than it uses.
@@ -111,7 +114,8 @@ module "hamster_workload" {
   # module after the release also makes terraform destroy remove the VPA object while
   # the CRD and its webhook are still there, so the delete reaches a live API server
   # (rules.md D-4).
-  depends_on = [module.eks_node_group, module.vertical_pod_autoscaler]
+  depends_on = [
+  module.network, module.eks_node_group, module.vertical_pod_autoscaler]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

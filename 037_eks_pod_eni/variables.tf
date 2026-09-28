@@ -148,3 +148,25 @@ variable "create_demo_pod" {
   default     = true
   description = "Whether to create the dnsutils demo pod to verify that SecurityGroupPolicy actually attaches the pod security group"
 }
+
+variable "marker_file_path" {
+  type        = string
+  default     = "/run/terraform"
+  description = "Directory on the workbench where user data drops its completion marker. The README association waits on that file rather than on depends_on, which does not observe whether the remote script finished (rules.md D-5)"
+
+  validation {
+    condition     = can(regex("^/", var.marker_file_path))
+    error_message = "marker_file_path must be an absolute path starting with '/'."
+  }
+}
+
+variable "readme_timeout_seconds" {
+  type        = number
+  default     = 1800
+  description = "How long the README association waits for success"
+
+  validation {
+    condition     = var.readme_timeout_seconds >= 300
+    error_message = "readme_timeout_seconds must be at least 300."
+  }
+}

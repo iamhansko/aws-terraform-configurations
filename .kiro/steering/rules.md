@@ -16,7 +16,7 @@ inclusion: always
 
 ```bash
 grep -rn 'rules\.md D-3' --include='*.tf' .        # 이 규칙을 근거로 삼은 코드 전부
-grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -rn
+grep -roh 'rules\.md [A-I]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -rn
 ```
 
 - **규칙을 추가할 때는 해당 파트의 맨 끝에 붙이고 그 파트의 다음 순번을 씁니다.** 파트 중간에 끼워 넣으면 뒤쪽 규칙의 ID가 전부 밀리므로 하지 않습니다.
@@ -77,12 +77,18 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 | CRLF가 섞였는가 | `grep -qU $'\r'` 순회 | A-4 |
 | 포맷이 정렬되어 있는가 | `terraform fmt -check -recursive` (`_monolithic/`의 기계 변환 산출물 3개는 원래 정렬되어 있지 않습니다 — 조회 전용이므로 그대로 둡니다) | A-4 |
 | Helm 값이 의도한 타입으로 렌더링되는가 | `helm template` | E-7, G-2 |
+| Add-on 설정값이 스키마의 타입과 맞는가 (bool처럼 보이지만 문자열) | `describe-addon-configuration`의 스키마, 적용 후 `describe-addon` | E-5 |
 | 컨트롤러가 로드밸런서를 채택했는가 (2개가 아닌가) | `resourcegroupstaggingapi get-resources` | G-3 |
 | 컨트롤러가 바꾼 필드를 apply가 되돌리는가 | 값을 옮긴 뒤 `terraform plan`이 `No changes`인지 | E-8 |
 | 프라이빗 엔드포인트인데 kubectl/helm 프로바이더를 선언했는가 | `providers.tf`의 프로바이더와 `endpoint_public_access`의 기본값 대조 | E-9 |
+| `network` 뒤에 오지 않는 모듈이 있는가 | `depends_on` 간선의 도달 집합 (개수를 세지 않습니다) | D-3 |
+| `depends_on`이 미뤄버린 `data`를 `for_each` 키로 쓰는가 | `depends_on`을 가진 모듈의 `data` 선언을 찾고 `plan`까지 실행 | D-6 |
 | 채택 태그의 이름 부분이 차트가 만드는 오브젝트 이름과 같은가 | `helm template`으로 Service 이름 확인 | G-3 |
 | 보안그룹이 Service가 발행하는 포트를 전부 열었는가 | `helm template`으로 렌더된 Service의 포트와 SG·파드 쪽 규칙 대조 | G-1 |
 | Service 생성을 막는 컨트롤러 웹훅이 남아 있는가 | `kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook` | G-4 |
+| 계정 간 합의한 이름이 양쪽 루트에서 같은가 | 루트별 `default` 값을 뽑아 대조 | I-2 |
+| 한 루트가 두 계정을 건드리고 있는가 | `provider "aws"` 블록의 `assume_role`/`profile` 유무 | I-1 |
+| 컨트롤러 역할에 광범위 관리형 정책이 붙어 있는가 | `grep -rln 'policy/AdministratorAccess'` 후 작업대 제외 | A-5 |
 
 ### 목차
 
@@ -92,6 +98,7 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 - A-2. 루트 구성과 모듈 모두 4파일 분리
 - A-3. `aws_iam_instance_profile`의 `role`은 역할 이름 문자열 하나만 받는다 (CloudFormation 변환 시 흔한 버그)
 - A-4. `.tf` 파일은 LF로 저장한다 (CRLF는 heredoc 종료자를 깨뜨려 셸 스크립트 전체를 실행 불가로 만든다)
+- A-5. 원본이 부트스트랩 스크립트로 만들던 IAM 권한을 관리형 광범위 정책으로 대체하지 않는다
 
 **B. 변수와 인터페이스 설계**
 
@@ -115,9 +122,10 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 
 - D-1. IAM 역할-정책 결합 리소스는 `depends_on`으로 생성 순서를 명시
 - D-2. 모듈 간 생성 순서는 `module` 블록의 `depends_on` 메타 인수로 표현
-- D-3. `network` 모듈의 VPC/서브넷을 사용하는 모든 모듈은 `depends_on = [module.network]`를 명시
+- D-3. `network` 모듈이 있는 루트의 모든 모듈은 `network` 전체가 끝난 뒤에 시작한다 (직접 또는 다른 모듈을 거쳐)
 - D-4. `kubectl_manifest`는 EKS 클러스터가 아니라 그 매니페스트가 실제로 의존하는 노드 리소스에 `depends_on`을 걸어서, `terraform destroy`가 apply의 정확한 역순으로 진행되게 한다
 - D-5. SSM Association의 순서는 `depends_on`이 아니라 마커 파일과 `until` 루프로 강제한다
+- D-6. `module` 블록의 `depends_on`은 그 모듈 안의 `data` 소스까지 apply로 미룬다 — plan 시점에 읽혀야 하는 `data`는 모듈 밖에 둔다
 
 **E. Kubernetes 리소스를 만드는 방법**
 
@@ -147,6 +155,13 @@ grep -roh 'rules\.md [A-H]-[0-9]*' --include='*.tf' . | sort | uniq -c | sort -r
 
 - H-1. EKS 클러스터와 `vscode_ec2`가 같은 루트 모듈에 함께 선언되면 code-server, kubectl, eksctl, helm, docker를 **모두** 설치한다
 - H-2. 루트 `outputs.tf`의 모든 값은 SSM Association으로 `vscode_ec2`의 `README.md`에도 기록한다 (마커 파일로 순서 강제)
+
+**I. 여러 계정과 여러 리전**
+
+- I-1. 계정마다 독립된 루트 모듈을 만들고, 한 루트가 두 계정을 건드리지 않는다
+- I-2. 계정 간 순환 참조는 이름을 미리 합의해서 끊는다 (고정 이름이 정당한 유일한 경우)
+- I-3. 같은 계정 안의 여러 리전은 `provider` alias로 나누고, 어느 리전의 것인지를 리소스 이름에 남긴다
+- I-4. 계정 간 apply·destroy 순서는 README가 아니라 양쪽 루트의 output에 적는다
 
 ## A. 저장소 구조 · 파일 · CloudFormation 변환
 
@@ -226,6 +241,31 @@ resource "aws_iam_instance_profile" "vscode_ec2_instance_profile" {
 
 CloudFormation 변환 결과물(`_monolithic/*.tf`)을 참고 자료로 모듈화할 때는 이런 리스트→단일 값 축소가 필요한 속성(`role`, `key_name` 등 1:1 관계인 필드)을 눈여겨보고, 원본을 그대로 베끼지 않습니다.
 
+#### `aws_iam_instance_profile`만의 문제가 아닙니다
+
+같은 실수가 **CloudFormation에서 복수 속성을 갖는 모든 리소스**에서 나옵니다. 지금까지 발견된 것:
+
+| 리소스 | Terraform 속성(문자열 하나) | CloudFormation 속성(리스트) |
+| --- | --- | --- |
+| `aws_iam_instance_profile` | `role` | `AWS::IAM::InstanceProfile`의 `Roles` |
+| `aws_sqs_queue_policy` | `queue_url` | `AWS::SQS::QueuePolicy`의 `Queues` |
+| `aws_sns_topic_policy` | `arn` | `AWS::SNS::TopicPolicy`의 `Topics` |
+
+**속성 이름으로 찾으면 다음 사례를 놓칩니다.** 위 표의 두 번째 행이 그 증거입니다 — `058_eks_fis_experiments`와 `060_eks_node_termination_handler`의 원본에 `queue_url = jsonencode([aws_sqs_queue.x.id])`가 있었고, `role = jsonencode([` 로 찾는 명령은 이것을 잡지 못했습니다. 그래서 **속성 이름을 빼고 `jsonencode([` 자체를 찾은 뒤 사람이 판정합니다.**
+
+```bash
+# jsonencode([...])를 스칼라 속성에 넘긴 곳을 전부 나열합니다.
+# 정당한 용법(policy 문서의 Action/Resource 리스트 등)도 함께 걸리므로, 좌변이
+# 문자열 하나를 받는 속성인지를 보고 판정합니다 - 그 판정은 grep이 할 수 없습니다.
+grep -rn 'jsonencode(\[' --include='*.tf' . | grep -v '_monolithic'
+
+# 좌변이 단순 속성 대입인 것만 좁혀 보면 거짓 양성이 크게 줄어듭니다.
+grep -rnE '^ *[a-z_]+ *= *jsonencode\(\[' --include='*.tf' . | grep -v '_monolithic'
+```
+
+- **`terraform validate`는 이 오류를 잡지 못합니다.** 속성 타입이 어느 쪽이든 문자열이기 때문입니다. `plan`도 통과하고, 실패는 apply 중 해당 서비스의 API 오류로 나타납니다(IAM은 역할 이름 형식 오류, SQS는 malformed queue URL).
+- 그래서 **`_monolithic/`을 참고할 때 이 형태를 먼저 훑고 목록을 만들어 두는 것**이 변환 중에 하나씩 발견하는 것보다 싸게 끝납니다.
+
 ### A-4. `.tf` 파일은 LF로 저장한다 (CRLF는 heredoc 종료자를 깨뜨려 셸 스크립트 전체를 실행 불가로 만든다)
 
 `.tf` 파일이 CRLF로 저장되면 heredoc 안의 리터럴 줄이 모두 `\r`로 끝납니다. 그러면 셸 heredoc의 종료자가 `EOF`가 아니라 **`EOF\r`**이 되고, 셸은 이것을 종료자로 인정하지 않습니다. heredoc이 파일 끝까지 이어지고 스크립트 전체가 파싱에 실패합니다 — **한 줄도 실행되지 않습니다.**
@@ -297,6 +337,56 @@ commands = replace(<<-EOT
 
 - heredoc 종료자 줄에는 마커만 올 수 있어 `replace()`의 나머지 인자가 다음 줄로 밀려나므로, 읽는 사람에게 heredoc이 끝난 위치가 불분명해집니다(B-4번 패턴의 `EOT : ""`가 `Error: Invalid expression`으로 거부되는 것과 같은 제약).
 - CRLF가 이미 유입된 상황을 코드가 조용히 덮어써서, 정작 고쳐야 할 파일의 줄바꿈 문제가 드러나지 않습니다.
+
+### A-5. 원본이 부트스트랩 스크립트로 만들던 IAM 권한을 관리형 광범위 정책으로 대체하지 않는다
+
+변환 중에 IAM을 넓히기 가장 쉬운 지점입니다. 그리고 넓혔다는 사실이 코드에 남지 않습니다.
+
+`_monolithic/*.tf`만 보면 컨트롤러의 IAM 역할이 무엇을 할 수 있었는지 알 수 없는 경우가 있습니다. 원본이 그 역할을 Terraform으로 만들지 않고, 배스천에서 셸 스크립트를 클론해 실행했기 때문입니다.
+
+```bash
+# 007/017의 _monolithic이 실제로 하던 것
+git clone https://github.com/AWS-Skills/eks-deepdive.git
+/home/ec2-user/karpenter/00_install_karpenter.sh
+```
+
+그 스크립트 안에서 일어나는 일:
+
+```bash
+# 00_install_karpenter.sh - Karpenter가 공개한 getting-started 템플릿을 배포합니다
+curl -fsSL .../getting-started-with-karpenter/cloudformation.yaml > "$TEMPOUT" && aws cloudformation deploy ...
+eksctl create iamserviceaccount --attach-policy-arn "arn:aws:iam::$AWS_ACCOUNT_ID:policy/KarpenterControllerPolicy-$CLUSTER_NAME" ...
+```
+
+즉 원본의 컨트롤러는 **태그 조건으로 좁혀진 최소권한 정책**을 갖고 있었습니다. 그런데 그 정책은 `_monolithic/*.tf`에 한 글자도 나타나지 않습니다. 변환하는 사람이 보는 것은 "이 역할에 무슨 정책이 붙는지 알 수 없다"이고, 그때 손이 가는 것이 `AdministratorAccess`입니다.
+
+**그것이 변환이 아니라 권한 확대입니다.** 그리고 `plan`도 `validate`도 아무 말을 하지 않습니다 — 정책 ARN 하나가 다를 뿐입니다.
+
+#### 무엇을 하는가
+
+- **원본이 IAM을 Terraform 밖에서 만들었다면, 그 밖을 읽습니다.** 클론하는 저장소, 실행하는 스크립트, 스크립트가 배포하는 CloudFormation 템플릿까지 따라가서 실제 정책을 찾습니다. 위의 세 줄이 그 추적의 전부였습니다.
+- **찾은 정책을 모듈이 직접 만듭니다.** `aws_iam_policy` + `aws_iam_role_policy_attachment`로 두고, 문서 본문은 `jsonencode`로 씁니다. 그러면 정책이 state에 들어오고 `plan`에서 읽히며 destroy에서 사라집니다 — 스크립트가 만든 CloudFormation 스택은 그중 아무것도 하지 않았습니다.
+- **추가 정책은 열어두되 기본값은 비웁니다.** `create_controller_policy`(기본 `true`)로 생성을 켜고, `controller_policy_arns`(기본 `[]`)는 그 위에 더하는 용도로만 둡니다. 기본값이 `[AdministratorAccess]`인 변수는 "필요하면 좁히세요"라고 적혀 있어도 좁혀지지 않습니다.
+- **정책이 다른 리소스를 참조하면 그 값은 변수로 받습니다.** Karpenter 정책의 `sqs:ReceiveMessage`는 인터럽션 큐 하나로 좁혀지는데, 그 큐는 다른 모듈이 만듭니다. 이름만 받으면 정책을 쓸 수 없으므로 ARN도 함께 받고, **둘 중 하나만 온 경우를 교차 참조 `validation`으로 막습니다**(B-1번) — 이름만 있고 ARN이 없으면 컨트롤러가 읽을 권한 없는 큐를 가리키게 되고, 실패는 컨트롤러 로그의 `AccessDenied` 루프로만 나타납니다.
+
+#### 원본이 정말로 광범위 정책을 붙이고 있었다면
+
+그것은 위와 다른 경우이고, 판단도 다릅니다. `004_batch_on_eks`의 원본은 컨트롤러 역할에 `AdministratorAccess`를 Terraform으로 명시해서 붙였습니다. 이때 최소권한으로 바꾸는 것은 **원본이 하던 일을 바꾸는 것**이므로, "`_monolithic/`은 조회 전용입니다" 절의 규칙대로 모듈화된 쪽을 고치고 **왜 달라졌는지 주석에 남깁니다.** 두 경우를 구분해서 적어야 하는 이유는, 다음 사람이 `_monolithic`과 대조하다가 "왜 다른가"를 다시 판정하게 되기 때문입니다.
+
+#### 확인하는 방법
+
+컨트롤러·에이전트 성격의 역할에 광범위 관리형 정책이 붙어 있는 곳을 찾습니다. 사람이 쓰는 작업대(`vscode_ec2`, `bastion_ec2`)는 제외합니다 — 그쪽은 데모를 막지 않기 위해 넓은 것이 의도이고, H-1번이 그 전제입니다.
+
+```bash
+# 모듈이 컨트롤러 역할에 AdministratorAccess를 붙이는 곳
+grep -rln 'policy/AdministratorAccess' --include='*.tf' . \
+  | grep -v '/.terraform/' | grep -v '_monolithic' \
+  | grep -v 'vscode_ec2' | grep -v 'bastion'
+
+# 변수 기본값으로 숨어 있는 경우까지 보려면 default 줄을 함께 봅니다
+grep -rn -B3 'policy/AdministratorAccess' --include='variables.tf' . \
+  | grep -E 'variable "|default' | grep -v '_monolithic'
+```
 
 ## B. 변수와 인터페이스 설계
 
@@ -830,9 +920,10 @@ Terraform의 암묵적 그래프는 **값 참조**만 따라갑니다. `a = modu
 | --- | --- | --- |
 | 같은 모듈 안의 리소스가 IAM 정책 attachment 등을 기다려야 함 | 리소스의 `depends_on` | D-1 |
 | 다른 모듈이 준비된 뒤여야 하는데 값 참조가 없음 | `module` 블록의 `depends_on` | D-2 |
-| `network` 모듈이 있는 루트의 모든 모듈 | `module` 블록의 `depends_on` (**필수**) | D-3 |
+| `network` 모듈이 있는 루트의 모든 모듈 | `module` 블록의 `depends_on` (**필수**, 간접도 유효) | D-3 |
 | 클러스터 API 서버로 직접 요청하는 리소스, `destroy` 역순이 필요 | 매니페스트가 의존하는 **노드 리소스**를 가리키는 `depends_on` | D-4 |
 | 원격 셸 명령의 완료를 기다려야 함 | `depends_on`이 아니라 **마커 파일 + `until` 루프** | D-5 |
+| `depends_on`이 붙은 모듈이 plan 시점에 읽혀야 하는 `data`를 가짐 | 그 `data`를 **루트로 옮기고** 결과를 변수로 넘김 | D-6 |
 
 마지막 행이 이 파트에서 유일하게 `depends_on`으로 풀지 않는 경우입니다. 같은 마커 파일 메커니즘을 B-4번(userdata가 마커를 만드는 위치)과 H-2번(README를 쓰는 association이 그 마커를 기다림)이 함께 씁니다.
 
@@ -877,7 +968,7 @@ module "karpenter" {
 
 `karpenter` 모듈은 `eks_fargate_profile` 모듈의 output을 전혀 쓰지 않으므로(값 참조로는 암묵적 의존관계가 생기지 않음), Terraform 그래프만 보면 두 모듈이 동시에 생성될 수 있습니다. 하지만 Karpenter 컨트롤러 파드가 뜨려면 CoreDNS가 (Fargate profile 생성 후 E-4번 패턴으로 재스케줄되어) 먼저 응답 가능한 상태여야 하므로, 이 실제 런타임 의존성을 `depends_on`으로 명시적으로 표현합니다. D-1번 패턴(리소스 레벨 `depends_on`)과 동일한 이유이며, 적용 대상이 리소스가 아니라 모듈 블록이라는 점만 다릅니다.
 
-### D-3. `network` 모듈의 VPC/서브넷을 사용하는 모든 모듈은 `depends_on = [module.network]`를 명시
+### D-3. `network` 모듈이 있는 루트의 모든 모듈은 `network` 전체가 끝난 뒤에 시작한다
 
 루트 `main.tf`에서 `module.network.vpc_id`, `module.network.*_subnet_id`, `module.network.*_subnet_ids` 중 하나라도 입력으로 받는 모든 `module` 블록은, 그 값을 실제로 참조하고 있어도 별도로 `depends_on = [module.network]`를 추가합니다.
 
@@ -908,7 +999,49 @@ module "vscode_ec2" {
 
 - 이는 D-2번 패턴(모듈 간 `depends_on`)의 특수 사례이며, `network` 모듈에 대해서는 선택이 아니라 **필수**로 적용합니다.
 - `network`의 output을 전혀 쓰지 않는 모듈(예: `key_pair`)에도 동일하게 `depends_on = [module.network]`를 추가해서, 루트의 모든 리소스/모듈이 `network` 완성 이후에만 시작되도록 통일합니다.
-- 값 참조가 있는 모듈이든 없는 모듈이든 규칙은 동일합니다: **루트에 `module "network"` 블록이 있는 프로젝트라면, 다른 모든 `module` 블록에 `depends_on = [module.network]`를 추가합니다.**
+- 값 참조가 있는 모듈이든 없는 모듈이든 규칙은 동일합니다: **루트에 `module "network"` 블록이 있는 프로젝트라면, 다른 모든 `module` 블록이 `network` 전체가 끝난 뒤에 시작되어야 합니다.**
+
+#### 만족시키는 방법은 두 가지이고, 둘 다 유효합니다
+
+`depends_on = [module.network]`를 직접 붙이거나, **이미 그것을 가진 다른 모듈을 `depends_on`으로 가리키는 것**입니다. `module` 블록의 `depends_on`은 "그 모듈의 **모든** 리소스 이후"를 뜻하므로 이 관계는 합성됩니다 — `eks_coredns_addon`이 `depends_on = [module.eks_node_group]`이고 `eks_node_group`이 `depends_on = [module.network]`이면, coredns는 network 전체 이후입니다. 여기에 `module.network`를 한 번 더 적는 것은 그래프에 아무것도 더하지 않습니다.
+
+이 저장소의 실제 형태가 그것입니다. 70개 루트 중 대부분이 클러스터·노드그룹·key_pair에는 직접 붙이고, 그 뒤에 오는 애드온·워크로드·컨트롤러 모듈은 노드그룹을 가리켜 간접적으로 만족시킵니다. **따라서 `depends_on = [module.network]`의 개수를 세는 것으로는 이 규칙을 감사할 수 없습니다.**
+
+- **값 참조는 여기에 포함되지 않습니다.** `subnet_ids = module.network.private_subnet_ids`는 그 output을 만든 리소스까지만 순서를 잡으므로, 이 규칙을 만족시키는 간선이 아닙니다. 그것이 이 규칙이 존재하는 이유입니다.
+- **VPC와 무관한 모듈에도 적용합니다.** `key_pair`, ECR 리포지토리, S3 버킷, EventBridge 규칙, CodeStar 연결처럼 network에서 아무것도 받지 않는 모듈도 예외로 두지 않습니다. 목적이 "이 모듈이 NAT를 기다려야 한다"가 아니라 **"루트에 예외가 없다"**이기 때문입니다. 예외가 하나 있으면 읽는 사람이 모듈마다 판정해야 하고, `destroy` 순서도 그 하나만 어긋납니다.
+- 감사 방법: 개수가 아니라 **도달 가능성**을 봅니다. 각 `module` 블록의 `depends_on`에서 다른 모듈로 가는 간선만 모아 `network`에서의 도달 집합을 구하고, 그 집합에 없는 모듈이 위반입니다. 값 참조는 간선으로 세지 않습니다.
+
+```bash
+# main.tf의 module 블록과 그 depends_on만 읽어 network에서 도달하지 못하는 모듈을 찾습니다
+python - <<'PY'
+import pathlib, re
+for main in list(pathlib.Path('.').glob('*/main.tf')) + list(pathlib.Path('.').glob('*/*/main.tf')):
+    if {'_monolithic', 'modules', '.terraform'} & set(main.parts):
+        continue
+    text = main.read_text(encoding='utf-8')
+    edges = {}
+    for m in re.finditer(r'^module "([^"]+)" \{$', text, re.M):
+        depth, i = 1, m.end()
+        while depth and i < len(text):
+            depth += (text[i] == '{') - (text[i] == '}')
+            i += 1
+        body = text[m.end():i]
+        edges[m.group(1)] = set(re.findall(r'module\.([A-Za-z0-9_]+)',
+            ''.join(re.findall(r'depends_on\s*=\s*\[(.*?)\]', body, re.S))))
+    if 'network' not in edges:
+        continue
+    reached, changed = {'network'}, True
+    while changed:
+        changed = False
+        for name, deps in edges.items():
+            if name not in reached and deps & reached:
+                reached.add(name); changed = True
+        # fixed point
+    missing = sorted(set(edges) - reached)
+    if missing:
+        print(f'{main.parent}: {missing}')
+PY
+```
 
 ### D-4. `kubectl_manifest`는 EKS 클러스터가 아니라 그 매니페스트가 실제로 의존하는 노드 리소스에 `depends_on`을 걸어서, `terraform destroy`가 apply의 정확한 역순으로 진행되게 한다
 
@@ -978,6 +1111,76 @@ resource "aws_ssm_association" "vscode_association_2" {
       EOT
   }
 }
+```
+
+### D-6. `module` 블록의 `depends_on`은 그 모듈 안의 `data` 소스까지 apply로 미룬다 — plan 시점에 읽혀야 하는 `data`는 모듈 밖에 둔다
+
+`module` 블록의 `depends_on`은 리소스만 늦추는 것이 아닙니다. **그 모듈 안에 선언된 모든 `data` 소스가 plan 단계에서 읽히지 않고 apply로 미뤄집니다.** 순서를 지키려면 의존 대상이 만들어진 뒤에 읽어야 하므로 Terraform으로서는 맞는 동작이지만, 결과적으로 그 `data`에서 파생된 모든 값이 plan 시점에 unknown이 됩니다.
+
+이것이 B-8번과 겹치면 진단이 어긋납니다. `for_each`의 키를 그 `data`에서 만들고 있으면 plan이 이렇게 실패합니다.
+
+```
+Error: Invalid for_each argument
+  on modules\gateway_api_crds\main.tf line 79, in resource "kubectl_manifest" "crd":
+  79:   for_each  = local.keyed_documents
+    │ local.keyed_documents will be known only after apply
+```
+
+**메시지는 `local`을 가리키지만 원인은 루트의 `module` 블록에 있습니다.** `data "http"`는 클러스터와 아무 관계가 없어 혼자 두면 plan에서 읽히는데, 그 모듈에 `depends_on = [module.eks_node_group]`이 붙어 있어서 미뤄진 것입니다. 로컬 표현식이나 split 방식을 의심하며 시간을 쓰게 되는 지점입니다.
+
+`070_eks_vpc_lattice`의 Gateway API CRD 번들이 이 사례입니다. 해결은 **`data`를 루트로 옮기고 그 결과를 변수로 넘기는 것**입니다.
+
+```hcl
+# 루트 main.tf - 이 data 소스에는 depends_on이 없으므로 plan에서 읽힙니다
+data "http" "gateway_api_bundle" {
+  url = local.gateway_api_crd_url
+}
+module "gateway_api_crds" {
+  source = "./modules/gateway_api_crds"
+
+  bundle_yaml = data.http.gateway_api_bundle.response_body
+
+  # 모듈의 순서는 그대로 유지합니다. 이 depends_on이 정하는 것은 CRD가 "언제 적용되는지"이고,
+  # 번들을 "언제 읽는지"와는 분리되었습니다 (rules.md D-6).
+  depends_on = [module.network, module.eks_node_group, module.eks_coredns_addon]
+}
+```
+
+- **모듈의 `depends_on`을 떼는 방식으로 풀지 않습니다.** 그 순서는 D-4번이 요구하는 것이고(destroy 역순), 값을 읽는 시점과는 별개의 요구사항입니다. 둘을 분리하는 것이 옳습니다.
+- **모듈 안에 남아도 되는 `data`는 apply 시점 값으로 충분한 것뿐입니다.** `data.aws_caller_identity`, `data.aws_region`처럼 결과가 리소스 주소나 `count`/`for_each` 키에 쓰이지 않는 것은 미뤄져도 아무 문제가 없습니다. 판정 기준은 "그 값이 plan 시점에 알려져야 하는가"입니다.
+- 이 규칙은 리소스 레벨 `depends_on`(D-1번)에는 해당하지 않습니다. 리소스에 붙인 `depends_on`은 그 리소스만 늦추므로, 같은 모듈의 `data` 소스는 정상적으로 plan에서 읽힙니다.
+- **`terraform validate`는 이것을 잡지 못합니다.** 구성은 유효하고, 실패는 `plan`에서만 드러납니다. A-2번의 "validate로 판정한다"가 적용되지 않는 사례이므로, `for_each`를 쓰는 모듈을 추가했으면 `plan`까지 돌립니다.
+- 감사 방법: `depends_on`을 가진 `module` 블록이 참조하는 모듈에 `data` 소스가 있는지 찾고, 그 값이 `for_each`/`count`/리소스 이름에 쓰이는지 확인합니다.
+
+**"`data` 소스가 있고 `for_each`도 있다"로 찾으면 안 됩니다.** 그 조건은 이 저장소에서 118곳을 잡고 그중 위반은 0곳입니다 — `vscode_ec2`가 `data.aws_ami`를 갖고 IAM 정책 attachment를 `for_each`로 붙이는 것이 대표적이고, 둘은 아무 관계가 없습니다. 전부 걸리는 감사는 없는 것보다 나쁩니다.
+
+실제 조건은 **`for_each`/`count` 식이 그 `data`에서 파생되었는가**입니다. 한 단계 추적하면 충분히 구분됩니다: 식이 `data.`를 직접 쓰거나, `local.`을 쓰는데 그 모듈의 `locals`가 `data.`를 쓰는 경우입니다. 아래는 위 두 형태(직접 참조, 로컬 경유) 모두를 잡고 나머지는 잡지 않습니다.
+
+```bash
+python - <<'PY'
+import pathlib, re
+for main in list(pathlib.Path('.').glob('*/main.tf')) + list(pathlib.Path('.').glob('*/*/main.tf')):
+    if {'_monolithic', 'modules', '.terraform'} & set(main.parts):
+        continue
+    text = main.read_text(encoding='utf-8')
+    for m in re.finditer(r'^module "([^"]+)" \{$', text, re.M):
+        depth, i = 1, m.end()
+        while depth and i < len(text):
+            depth += (text[i] == '{') - (text[i] == '}')
+            i += 1
+        body = text[m.end():i]
+        src = re.search(r'source\s*=\s*"\./modules/([^"]+)"', body)
+        if 'depends_on' not in body or not src:
+            continue
+        mod = main.parent / 'modules' / src.group(1)
+        blob = ''.join(tf.read_text(encoding='utf-8') for tf in sorted(mod.glob('*.tf')))
+        if not re.search(r'^data "', blob, re.M):
+            continue
+        locals_blob = ''.join(re.findall(r'^locals \{(.*?)^\}', blob, re.S | re.M))
+        for expr in re.findall(r'^\s*(?:for_each|count)\s*=(.*)$', blob, re.M):
+            if 'data.' in expr or ('local.' in expr and 'data.' in locals_blob):
+                print(f'{main.parent} -> modules/{src.group(1)}: {expr.strip()}')
+PY
 ```
 
 ## E. Kubernetes 리소스를 만드는 방법
@@ -1202,6 +1405,67 @@ resource "aws_eks_addon" "vpc_cni" {
 ```
 
 - `configuration_values`가 받는 JSON 스키마는 Add-on마다 다르며(`vpc-cni`는 `env` 맵으로 DaemonSet 환경변수를 받음), Add-on의 `aws eks describe-addon-configuration` 출력이나 공식 문서로 확인해야 합니다.
+
+#### 스키마의 타입을 확인하고 넣습니다 — bool로 보이는 값이 문자열일 수 있습니다
+
+`env` 아래의 값이 전부 문자열인 것은 DaemonSet 환경변수라서 그렇고(`tostring(var.enable_pod_eni)`가 그 이유), **최상위 키도 문자열일 수 있습니다.** `vpc-cni`의 `enableNetworkPolicy`가 그 예로, 스키마가 이렇게 선언합니다.
+
+```json
+"enableNetworkPolicy": { "format": "boolean", "type": "string" }
+```
+
+`format`만 보고 bool을 넣으면 EKS가 거부합니다.
+
+```
+InvalidParameterException: ConfigurationValue provided in request is not supported:
+Json schema validation failed with error: [$.enableNetworkPolicy: boolean found, string expected]
+```
+
+**E-7과 방향이 반대라는 점이 핵심입니다.** Helm의 `set`은 차트의 `kindIs "bool"` 가드를 통과해야 하므로 진짜 bool이 필요하고, EKS Add-on의 `configuration_values`는 같은 개념을 문자열로 받습니다. 둘을 같은 규칙으로 묶지 않습니다.
+
+| 넣는 곳 | 필요한 타입 | 틀렸을 때 |
+| --- | --- | --- |
+| `helm_release`의 `set` (차트 값) | 진짜 bool — `type = "string"`을 붙이지 않는다 | 플래그가 조용히 누락되고 차트 기본값으로 동작 (E-7, G-2) |
+| `aws_eks_addon`의 `configuration_values` | 스키마가 정한 타입. `enableNetworkPolicy`는 문자열 | apply에서 `InvalidParameterException`으로 즉시 실패 |
+
+**이 실수는 `plan`으로 잡히지 않습니다.** 스키마는 EKS API 쪽에 있고 `configuration_values`는 Terraform에게 그냥 문자열이라서, `validate`와 `plan` 모두 통과하고 apply에서 처음 드러납니다. 그래서 값을 추측하지 말고 스키마를 직접 읽습니다.
+
+```bash
+aws eks describe-addon-configuration --addon-name vpc-cni \
+  --addon-version "$(aws eks describe-addon-versions --addon-name vpc-cni \
+      --kubernetes-version 1.33 --query 'addons[0].addonVersions[0].addonVersion' --output text)" \
+  --query 'configurationSchema' --output text > schema.json
+# 키가 최상위 properties에 없을 수 있습니다 - definitions 안에 들어 있는 경우가 있어 전체를 훑습니다
+python -c "
+import json
+def walk(n,p=''):
+    if isinstance(n,dict):
+        for k,v in n.items():
+            if k=='enableNetworkPolicy': print(p+'.'+k, '->', json.dumps(v))
+            walk(v,p+'.'+k)
+    elif isinstance(n,list):
+        for i,v in enumerate(n): walk(v,'%s[%d]'%(p,i))
+walk(json.load(open('schema.json')))"
+```
+
+- 적용된 뒤에는 EKS가 저장한 값을 그대로 되읽어 확인합니다. 문자열로 들어갔는지 여기서 보입니다.
+
+```bash
+aws eks describe-addon --cluster-name <cluster> --addon-name vpc-cni \
+  --query 'addon.[status,configurationValues]' --output text
+#   ACTIVE	{"enableNetworkPolicy":"true"}
+```
+
+- 값을 `null`로 둘 수 있게 만들고, `null`이면 그 키를 JSON에서 아예 빼는 편이 낫습니다. 명시적 `null`을 보내면 스키마 검증에 걸리고, 키가 없으면 EKS가 자기 기본값을 적용합니다.
+
+```hcl
+configuration = merge(
+  length(var.env) > 0 ? { env = var.env } : {},
+  var.enable_network_policy != null ? { enableNetworkPolicy = tostring(var.enable_network_policy) } : {},
+)
+configuration_values = length(local.configuration) > 0 ? jsonencode(local.configuration) : null
+```
+
 - `aws_eks_addon`은 `status`라는 output 속성을 노출하지 않습니다 (`arn`, `id`, `configuration_values`, `created_at`, `modified_at` 등은 노출). Add-on 상태를 output으로 참조하려는 경우 `terraform validate` 단계에서 "Unsupported attribute" 에러가 나므로, 실제로 필요한 output만(`arn` 등) 선언합니다.
 
 ### E-6. AWS 서비스가 EKS에 접근해야 할 때는 principal이 서비스 연결 역할인지 먼저 확인한다 (Access Entry는 서비스 연결 역할을 지원하지 않음)
@@ -2700,3 +2964,209 @@ output "update_kubeconfig_command" {
 - **apply 시점에 Terraform이 모르는 값**(예: AWS Load Balancer Controller가 만드는 로드밸런서의 DNS 이름)은 그 항목을 빼는 게 아니라, 값 자리에 **확인 명령**을 넣습니다: `kubectl -n <ns> get service <name>`. output과 README가 같은 맵을 보므로 양쪽에 동일하게 그 명령이 나갑니다.
 - **`sensitive = true`가 필요한 값은 예외입니다.** 비밀번호·토큰 같은 값을 README로 디스크에 남기면 인증 없이 열리는 code-server를 통해 그대로 노출됩니다. 이런 항목은 맵의 `value`에 값 대신 조회 방법(`aws secretsmanager get-secret-value --secret-id ...`)을 넣고, 실제 값이 필요한 output은 별도로 `sensitive = true`로 선언합니다. 이때만 output과 README가 서로 다른 것을 담습니다.
 - 이 패턴은 인스턴스에 `AmazonSSMManagedInstanceCore`가 붙어 있어야 동작합니다(`vscode_ec2` 모듈의 `iam_policy_arns` 기본값에 포함).
+
+## I. 여러 계정과 여러 리전
+
+여기까지의 규칙은 전부 **하나의 자격증명, 하나의 state 파일**을 전제합니다. 그 전제가 깨지는 곳이 두 군데 있고, 둘은 성질이 다릅니다.
+
+| | 경계 | 나누는 방법 | 값을 넘기는 방법 |
+| --- | --- | --- | --- |
+| 여러 리전 | 같은 계정, 다른 리전 | 한 루트 안에서 `provider` alias | 리소스 속성 참조 (같은 state) |
+| 여러 계정 | 다른 자격증명 | **루트 자체를 분리** | 변수 (state가 다르므로 참조 불가) |
+
+**리전은 provider의 인수이고, 계정은 자격증명입니다.** 그래서 리전은 한 루트 안에서 나눌 수 있고 계정은 나눌 수 없습니다 — 기술적으로는 `assume_role`로 가능하지만, 그것을 하지 않는 이유가 I-1번입니다.
+
+`056_eks_cross_region_velero_dr`이 이 파트의 유일한 사례이고, 세 개의 루트를 가집니다: 한 계정에서 두 클러스터를 세우는 `cluster`(리허설), 그리고 계정을 나눈 `primary_account`/`secondary_account` 쌍.
+
+### I-1. 계정마다 독립된 루트 모듈을 만들고, 한 루트가 두 계정을 건드리지 않는다
+
+두 계정에 리소스를 만드는 방법은 두 가지입니다.
+
+```hcl
+# 이렇게 하지 않습니다
+provider "aws" {
+  alias = "secondary"
+  assume_role {
+    role_arn = "arn:aws:iam::${var.secondary_account_id}:role/OrganizationAccountAccessRole"
+  }
+}
+```
+
+`assume_role`을 쓰면 한 번의 `apply`로 양쪽이 만들어지고 값도 참조로 흐르므로 편해 보입니다. 그렇게 하지 않는 이유:
+
+- **한 state 파일이 두 계정의 진실을 담습니다.** 어느 리소스가 어느 계정에 있는지는 리소스 주소가 아니라 `provider` 메타 인수에만 적혀 있고, 그것은 plan 출력에 나타나지 않습니다. `terraform destroy`가 무엇을 지울지 읽는 사람이 계정 단위로 구분할 수 없습니다.
+- **한쪽 계정의 권한만 잃어도 전체가 멈춥니다.** 역할이 사라지거나 신뢰 정책이 바뀌면 `plan`조차 실행되지 않고, 이미 만들어진 쪽도 손댈 수 없게 됩니다.
+- **실제 운영에서 두 계정은 보통 같은 사람이 같은 시점에 apply하지 않습니다.** 루트가 하나면 그 분리가 불가능합니다.
+- **계정 간 역할을 누가 만드는가**라는 순환이 생깁니다. `OrganizationAccountAccessRole`이 이미 있다는 전제가 구성에 숨고, 없는 계정에서는 이유가 드러나지 않는 `AccessDenied`가 됩니다.
+
+대신 **계정 하나당 루트 하나**를 만들고, 디렉토리 이름이 그 계정의 역할을 말하게 합니다(A-1번의 변형 구조를 계정 경계에 적용한 것입니다).
+
+```
+056_eks_cross_region_velero_dr/
+├── cluster/              # 한 계정 안에서만 도는 리허설
+├── primary_account/      # 백업을 만드는 쪽. 자기 계정 자격증명으로 apply
+├── secondary_account/    # 백업을 받는 쪽. 다른 계정 자격증명으로 apply
+└── README.md
+```
+
+- 각 루트는 자기 `modules/`를 독립적으로 소유합니다(A-1번). 계정 간에 모듈을 공유하지 않습니다.
+- **어느 계정에 apply하는지는 구성이 정하지 않습니다.** `provider "aws"`에 `profile`이나 `assume_role`을 쓰지 않고, 실행하는 사람의 자격증명 체인에 맡깁니다. 잘못된 계정에 apply하는 것을 막는 것은 `data.aws_caller_identity`로 검증하는 것이고, 그것이 I-2번에서 이름과 함께 나옵니다.
+- 감사 방법: 루트의 `provider` 블록이 계정을 특정하고 있으면 위반입니다.
+
+```bash
+grep -rn -A5 '^provider "aws"' --include='providers.tf' . | grep -E 'assume_role|profile' || echo "no root pins an account"
+```
+
+### I-2. 계정 간 순환 참조는 이름을 미리 합의해서 끊는다 (고정 이름이 정당한 유일한 경우)
+
+계정을 나누면 곧바로 순환이 나타납니다. S3 계정 간 복제가 그 전형입니다.
+
+- primary의 `aws_s3_bucket_replication_configuration`은 **대상 버킷의 이름**을 알아야 합니다. 그 버킷은 secondary 계정에 있습니다.
+- secondary의 `aws_s3_bucket_policy`는 **복제 역할의 ARN**을 알아야 합니다. 그 역할은 primary 계정에 있습니다.
+
+서로가 서로의 output을 필요로 하므로, 어느 쪽을 먼저 apply해도 참조할 값이 없습니다. state가 같다면 Terraform이 그래프로 풀어 주지만 state가 다르므로 풀리지 않습니다.
+
+**끊는 방법은 값을 참조하지 않고 이름을 미리 정해 두는 것입니다.** 양쪽이 같은 리터럴 문자열을 알고 있으면 참조가 필요 없어집니다.
+
+```hcl
+# primary_account/variables.tf - 자기가 만들 역할의 이름을 고정합니다
+variable "replication_role_name" {
+  type        = string
+  default     = "PrimaryS3ReplicationRole"
+  description = "복제 역할의 이름. secondary_account의 버킷 정책이 이 이름을 리터럴로 알고 있어야 하므로 고정입니다 - 양쪽 루트의 default가 같아야 하고, 한쪽만 바꾸면 복제가 조용히 멈춥니다"
+}
+
+# secondary_account/variables.tf - 같은 문자열을 반대쪽에서 선언합니다
+variable "primary_replication_role_name" {
+  type        = string
+  default     = "PrimaryS3ReplicationRole"
+  description = "primary_account가 만드는 복제 역할의 이름. 저쪽 루트의 replication_role_name과 같은 값이어야 합니다"
+}
+```
+
+- **이것이 `name_prefix`를 쓸 수 없는 정당한 예외입니다.** 다른 곳에서는 생성 이름을 고정하지 않는 쪽을 권합니다(G-3번의 로드밸런서 이름, A-3번 파트의 FIS 역할). 여기서는 반대쪽 계정이 이름으로만 찾을 수 있으므로 고정이 맞습니다. 그리고 그 대가도 같습니다: **한 계정에 이 프로젝트를 두 번 배포할 수 없습니다.** 두 번째 apply는 `EntityAlreadyExists`로 실패합니다. 접두사 변수를 하나 두어 양쪽에서 함께 바꿀 수 있게 하는 것이 이 대가를 줄이는 유일한 방법입니다.
+- **합의한 이름은 `validation`으로 형식을 못박습니다.** 값이 어긋난 것은 plan에서 잡히지 않고, 복제가 그냥 일어나지 않는 것으로만 나타납니다. 형식 검증이 값의 일치를 보장하지는 못하지만, 오타 중 상당수는 잡습니다.
+- **계정 ID도 변수로 받고, 자기 계정 ID와 비교합니다.** 잘못된 계정에 apply하는 것을 막는 유일한 지점입니다.
+
+```hcl
+variable "primary_account_id" {
+  type        = string
+  description = "이 구성을 apply할 계정 ID. 실행 중인 자격증명의 계정과 다르면 plan이 실패합니다"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.primary_account_id))
+    error_message = "primary_account_id must be a 12-digit AWS account ID."
+  }
+}
+variable "secondary_account_id" {
+  type        = string
+  description = "백업을 받는 계정 ID"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.secondary_account_id))
+    error_message = "secondary_account_id must be a 12-digit AWS account ID."
+  }
+  validation {
+    # 같은 값이면 계정을 나눈 의미가 없고, 두 루트가 같은 계정에서 서로의 리소스를
+    # 덮어씁니다. 이것은 조합에 관한 제약이므로 교차 참조로 씁니다 (rules.md B-1).
+    condition     = var.secondary_account_id != var.primary_account_id
+    error_message = "secondary_account_id must differ from primary_account_id. To rehearse in a single account, use the cluster variant instead, which builds both clusters in one account by design."
+  }
+}
+```
+
+`primary_account_id`가 실행 중인 자격증명과 같은지는 `validation`으로 표현할 수 없습니다(`data` 소스를 참조할 수 없습니다). 그 확인은 `precondition`으로 합니다.
+
+```hcl
+resource "aws_s3_bucket" "backup_bucket" {
+  bucket = var.primary_bucket_name
+
+  lifecycle {
+    precondition {
+      condition     = data.aws_caller_identity.current.account_id == var.primary_account_id
+      error_message = "This root must be applied with credentials for primary_account_id. Applying it into the other account creates the source bucket and the replication role in the wrong place, and the failure shows up only as replication never happening."
+    }
+  }
+}
+```
+
+- 감사 방법: 양쪽 루트가 선언한 합의 이름의 `default`를 뽑아 대조합니다. 값이 다르면 복제가 멈추고, 그것을 알려주는 것은 아무것도 없습니다.
+
+```bash
+for v in replication_role_name primary_replication_role_name; do
+  grep -rn -A3 "variable \"$v\"" --include='variables.tf' . | grep 'default'
+done
+```
+
+### I-3. 같은 계정 안의 여러 리전은 `provider` alias로 나누고, 어느 리전의 것인지를 리소스 이름에 남긴다
+
+계정이 하나면 리전은 한 루트 안에서 나눕니다. 자격증명이 같으므로 I-1번의 이유가 적용되지 않고, 값도 참조로 흐릅니다.
+
+```hcl
+provider "aws" {
+  region = var.primary_region
+}
+provider "aws" {
+  alias  = "secondary"
+  region = var.secondary_region
+}
+
+module "secondary_network" {
+  source    = "./modules/network"
+  providers = { aws = aws.secondary }
+  # ...
+}
+```
+
+- **기본 provider에 alias를 붙이지 않습니다.** 모든 모듈에 `providers`를 명시해야 하게 되고, 하나를 빠뜨리면 그 모듈이 조용히 기본 리전에 만들어집니다.
+- **리소스와 모듈 이름에 리전 역할을 넣습니다**(`primary_network`, `secondary_cluster`). `provider` 메타 인수는 plan 출력에 나오지 않으므로, 이름이 유일한 단서입니다. `056`의 원본은 `primary_cluster`/`secondary_cluster`라는 이름을 쓰면서 **둘을 같은 리전, 같은 VPC에 만들었습니다** — 이름만으로는 그것이 드러나지 않았습니다.
+- **모듈에는 `provider` 블록을 두지 않습니다**(A-2번). 모듈은 `required_providers`만 선언하고, 어느 리전에 만들지는 호출자가 `providers`로 정합니다.
+- **`data.aws_region`은 그 모듈에 전달된 provider의 리전을 돌려줍니다.** 루트에서 읽은 `data.aws_region.current.region`을 secondary 리전용 값으로 넘기면 어긋납니다. 리전 문자열이 필요한 모듈에는 **명시적으로 변수로 넘깁니다**(B-6번과 같은 이유).
+- 리전마다 따로 있어야 하는 것을 놓치기 쉽습니다. 확인할 것: AMI ID(리전별), ACM 인증서(ALB는 같은 리전, CloudFront는 us-east-1), EBS 스냅샷, ECR 리포지토리, 관리형 프리픽스 리스트 ID.
+
+```bash
+# 리전을 명시하지 않은 모듈 호출을 찾습니다. secondary가 붙은 이름인데
+# providers 인수가 없으면 기본 리전에 만들어집니다.
+grep -n -A8 'module "secondary' main.tf | grep -c 'providers' 
+```
+
+### I-4. 계정 간 apply·destroy 순서는 README가 아니라 양쪽 루트의 output에 적는다
+
+계정을 나누면 순서가 생기고, 그 순서를 Terraform이 강제할 수 없습니다. `depends_on`은 한 state 안에서만 동작하므로, 계정 간 순서는 **사람이 지켜야 하는 절차**가 됩니다.
+
+S3 계정 간 복제의 경우:
+
+| 순서 | 무엇을 | 왜 |
+| --- | --- | --- |
+| 1 | `secondary_account` apply | 대상 버킷이 있어야 primary의 복제 설정이 받아들여집니다. 없는 버킷을 대상으로 지정하면 S3가 거부합니다 |
+| 2 | `primary_account` apply | 복제 역할과 복제 설정을 만듭니다 |
+| 3 | 필요하면 `secondary_account` 재apply | 버킷 정책이 1단계에서 이미 역할 ARN을 리터럴로 알고 있으므로(I-2번) 보통 불필요합니다. 이름을 합의하는 방식이 이 재apply를 없애는 것이 목적입니다 |
+
+destroy는 정확한 역순입니다.
+
+| 순서 | 무엇을 | 왜 |
+| --- | --- | --- |
+| 1 | `primary_account` destroy | 복제 설정과 역할이 먼저 사라져야 합니다 |
+| 2 | `secondary_account` destroy | 복제가 살아 있는 동안 대상 버킷을 지우면 primary의 복제가 실패 상태로 남습니다 |
+
+**이 절차를 README에만 적지 않습니다.** 작업은 `vscode_ec2`의 브라우저 안에서 일어나고 거기에는 저장소의 README가 없습니다(H-2번). 양쪽 루트의 `local.outputs` 맵에 항목을 넣어 출력과 인스턴스의 README 양쪽에 같은 절차가 나가게 합니다.
+
+```hcl
+# primary_account/main.tf 의 local.outputs
+apply_order = {
+  order       = 1
+  title       = "이 루트를 apply하기 전에"
+  description = "secondary_account가 먼저 apply되어 있어야 합니다. 대상 버킷이 없으면 S3가 복제 설정을 거부합니다 - 그 실패는 plan에 나타나지 않고 apply 중간에 나옵니다"
+  value       = "cd ../secondary_account && terraform apply   # 먼저, 다른 계정 자격증명으로"
+}
+teardown_order = {
+  order       = 99
+  title       = "철거 순서"
+  description = "이 루트를 먼저 destroy합니다. 복제가 살아 있는 동안 대상 버킷을 지우면 복제가 실패 상태로 남고, 버킷에 객체가 있으면 destroy 자체가 BucketNotEmpty로 막힙니다"
+  value       = "terraform destroy   # 여기서 먼저, 그 다음 secondary_account"
+}
+```
+
+- **버킷은 `force_destroy`를 명시적으로 정합니다.** Velero 백업처럼 apply가 만들지 않은 객체가 쌓이는 버킷은 `terraform destroy`가 `BucketNotEmpty`로 막힙니다. 데모라면 `force_destroy = true`가 맞고, 그러면 **백업이 함께 사라진다는 사실**을 output에 적습니다. 기본값으로 숨기지 않습니다.
+- **버전 관리가 켜진 버킷은 `force_destroy`도 버전까지 지웁니다.** 복제 대상 버킷은 버전 관리가 필수(S3 복제의 전제)이므로, 이 조합에서 destroy는 되돌릴 수 없습니다.
+- 계정 간 순서가 필요한 것은 S3 복제만이 아닙니다. 같은 모양이 나오는 곳: KMS 키 정책(키가 있는 계정 쪽을 먼저), RAM 리소스 공유(공유하는 쪽 먼저, 받는 쪽이 초대를 수락), Route 53 존 연계, ECR 리포지토리 정책.

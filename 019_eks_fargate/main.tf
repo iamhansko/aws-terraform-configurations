@@ -101,7 +101,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE. Here that capacity is the kube-system Fargate profile, not a
   # node group, so this waits on the profile (rules.md C-4).
-  depends_on = [module.eks_kubesystem_fargate_profile]
+  depends_on = [
+  module.network, module.eks_kubesystem_fargate_profile]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

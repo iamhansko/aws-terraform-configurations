@@ -67,7 +67,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "eks_metrics_server_addon" {
   source = "./modules/eks_metrics_server_addon"
@@ -77,7 +78,8 @@ module "eks_metrics_server_addon" {
   # Also a Deployment, so it needs node capacity for the same reason as coredns.
   # Its own module rather than being folded in with the others, because AWS
   # releases addon versions independently (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The EBS CSI driver and its IRSA role are one module: the addon cannot use the
 # role unless the role trusts the driver's service account, and nothing else in
@@ -89,7 +91,8 @@ module "eks_ebs_csi_driver_addon" {
   oidc_provider_arn = module.eks_cluster.oidc_provider_arn
   oidc_issuer_host  = module.eks_cluster.oidc_issuer_host
 
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Marked cluster-default, which is what lets the monitoring chart request volumes
 # without naming a class. The _monolithic template applied this YAML from the
@@ -106,7 +109,8 @@ module "ebs_storage_class" {
   # PersistentVolumeClaim stuck Pending. Ordering after the addon module also
   # makes terraform destroy remove the class while the driver can still detach
   # volumes (rules.md D-4).
-  depends_on = [module.eks_ebs_csi_driver_addon]
+  depends_on = [
+  module.network, module.eks_ebs_csi_driver_addon]
 }
 # The controller that turns the three Services below into NLBs. Its IRSA role and
 # its Helm release live in one module, because the release has to annotate the
@@ -253,6 +257,7 @@ module "ingress_nginx" {
   # in-tree cloud provider claims the Service and builds a Classic Load Balancer
   # (rules.md G-1).
   depends_on = [
+    module.network,
     module.synced_load_balancer,
     module.aws_load_balancer_controller,
     module.eks_coredns_addon,
@@ -309,6 +314,7 @@ module "kube_prometheus_stack" {
   # and the driver behind it have to be there first; without them the release
   # times out on pods stuck Pending rather than failing with a clear message.
   depends_on = [
+    module.network,
     module.ebs_storage_class,
     module.ingress_nginx,
     kubectl_manifest.monitoring_namespace,

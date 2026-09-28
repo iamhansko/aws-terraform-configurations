@@ -64,7 +64,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Not what drives scaling here - the signal is a CloudWatch metric from outside the
 # cluster - but it is what makes "kubectl top" work, so the pods' actual load can be
@@ -76,7 +77,8 @@ module "eks_metrics_server_addon" {
 
   # Also a Deployment, so it needs node capacity for the same reason as coredns
   # (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The variant. KEDA plus the IAM role its operator assumes to read CloudWatch, in one
 # module because IRSA is one component: the trust policy names a service account the
@@ -94,7 +96,8 @@ module "keda" {
   # The release has wait = true, so the apply blocks until the operator, metrics
   # server and webhook are Available - all of which needs node capacity and working
   # DNS, since the operator resolves the CloudWatch and STS endpoints.
-  depends_on = [module.eks_node_group, module.eks_coredns_addon]
+  depends_on = [
+  module.network, module.eks_node_group, module.eks_coredns_addon]
 }
 module "aws_load_balancer_controller" {
   source = "./modules/aws_load_balancer_controller"
@@ -196,6 +199,7 @@ module "nginx_workload" {
   # still there, so the load balancer is cleaned up rather than orphaned
   # (rules.md D-4).
   depends_on = [
+    module.network,
     module.eks_node_group,
     module.eks_coredns_addon,
     module.aws_load_balancer_controller,
@@ -257,7 +261,8 @@ module "keda_scaled_object" {
   # destroy remove these objects while the operator is still running, so its
   # finalizers can complete - a ScaledObject deleted after the operator is gone waits
   # forever (rules.md D-4).
-  depends_on = [module.keda, module.nginx_workload]
+  depends_on = [
+  module.network, module.keda, module.nginx_workload]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

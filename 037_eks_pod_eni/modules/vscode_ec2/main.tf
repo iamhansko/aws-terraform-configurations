@@ -86,6 +86,13 @@ resource "aws_instance" "vscode_ec2" {
     systemctl start code-server
 
     ${var.additional_user_data}
+    # The marker is always the very last thing the script does. Touching it before
+    # additional_user_data would let an SSM Association waiting on it start while kubectl and
+    # helm are still installing (rules.md B-4/D-5).
+    %{if var.marker_file_path != null~}
+    mkdir -p ${var.marker_file_path}
+    touch ${var.marker_file_path}/userdata
+    %{endif~}
     EOT
 
   subnet_id                   = var.subnet_id

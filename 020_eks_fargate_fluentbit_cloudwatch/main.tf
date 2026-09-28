@@ -94,7 +94,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE. Here that capacity is the kube-system Fargate profile, not a
   # node group (rules.md C-4).
-  depends_on = [module.eks_kubesystem_fargate_profile]
+  depends_on = [
+  module.network, module.eks_kubesystem_fargate_profile]
 }
 # What the project is about: the namespace and ConfigMap that turn on Fargate's
 # built-in Fluent Bit log router, plus the CloudWatch permission on the pod

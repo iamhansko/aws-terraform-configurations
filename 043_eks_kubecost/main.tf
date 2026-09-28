@@ -67,7 +67,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The EBS CSI driver and its IRSA role are one module: the addon cannot use the
 # role unless the role trusts the driver's service account, and nothing else has a
@@ -79,7 +80,8 @@ module "eks_ebs_csi_driver_addon" {
   oidc_provider_arn = module.eks_cluster.oidc_provider_arn
   oidc_issuer_host  = module.eks_cluster.oidc_issuer_host
 
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Marked cluster-default, which is how Kubecost's bundled Prometheus gets a volume
 # without naming a class. The _monolithic template applied this YAML from the
@@ -95,7 +97,8 @@ module "ebs_storage_class" {
   # exists; the failure would show up later as a PersistentVolumeClaim stuck
   # Pending. Ordering after the addon also lets terraform destroy remove the class
   # while the driver can still detach volumes (rules.md D-4).
-  depends_on = [module.eks_ebs_csi_driver_addon]
+  depends_on = [
+  module.network, module.eks_ebs_csi_driver_addon]
 }
 # The controller that turns the ingress controller's Service into an NLB. Its IRSA
 # role and Helm release are one module, because the release has to annotate the
@@ -196,6 +199,7 @@ module "ingress_nginx" {
   # cloud provider claims the Service and builds a Classic Load Balancer, ignoring
   # every annotation (rules.md G-1).
   depends_on = [
+    module.network,
     module.synced_load_balancer,
     module.aws_load_balancer_controller,
     module.eks_coredns_addon,
@@ -231,7 +235,8 @@ module "kubecost" {
   # pods stuck Pending rather than failing with a clear message. The ingress
   # controller comes first because it owns the namespace and reconciles the
   # Ingress this module creates.
-  depends_on = [module.ebs_storage_class, module.ingress_nginx]
+  depends_on = [
+  module.network, module.ebs_storage_class, module.ingress_nginx]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

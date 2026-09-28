@@ -136,7 +136,8 @@ module "eni_config" {
   # pod's address when the pod is scheduled, so a node that joins before its zone's
   # ENIConfig exists gives its pods no addresses, and existing pods keep the
   # addresses they already have until they are recreated.
-  depends_on = [module.eks_vpc_cni_addon, module.pod_security_group]
+  depends_on = [
+  module.network, module.eks_vpc_cni_addon, module.pod_security_group]
 }
 module "eks_node_group" {
   source = "./modules/eks_node_group"
@@ -167,7 +168,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4). Its pods get addresses from the pod subnets, which
   # is why the pod security group has to allow DNS between its own members.
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "aws_load_balancer_controller" {
   source = "./modules/aws_load_balancer_controller"
@@ -222,6 +224,7 @@ module "nginx_workload" {
   # terraform destroy remove these manifests while the nodes and the controller are
   # still there (rules.md D-4).
   depends_on = [
+    module.network,
     module.eks_node_group,
     module.eks_coredns_addon,
     module.aws_load_balancer_controller,

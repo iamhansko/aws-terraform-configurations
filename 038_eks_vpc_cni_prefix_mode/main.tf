@@ -140,7 +140,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "aws_load_balancer_controller" {
   source = "./modules/aws_load_balancer_controller"
@@ -220,6 +221,7 @@ module "nginx_workload" {
   # terraform destroy remove these manifests while the nodes and the controller are
   # still there (rules.md D-4).
   depends_on = [
+    module.network,
     module.eks_node_group,
     module.eks_coredns_addon,
     module.aws_load_balancer_controller,

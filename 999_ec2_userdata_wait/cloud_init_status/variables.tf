@@ -37,3 +37,14 @@ variable "key_pair_name" {
   default     = "ec2-keypair"
   description = "Name of the EC2 key pair created for the VS Code EC2 instance"
 }
+
+variable "readme_timeout_seconds" {
+  type        = number
+  default     = 900
+  description = "How long the README association waits for success. Longer than the other associations here because it also waits for cloud-init, which is what this variant demonstrates"
+
+  validation {
+    condition     = var.readme_timeout_seconds >= 300
+    error_message = "readme_timeout_seconds must be at least 300."
+  }
+}

@@ -77,7 +77,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable node capacity to leave
   # its DEGRADED state and become ACTIVE, so it's created after the node
   # group instead of before it (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 
 module "pod_security_group_policy" {
@@ -103,6 +104,9 @@ module "vscode_ec2" {
   instance_type               = var.vscode_instance_type
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
   extra_security_group_ids    = [module.eks_cluster.cluster_security_group_id]
+  # The marker the README association below waits on, written as the last line of user data
+  # (rules.md B-4/D-5).
+  marker_file_path = var.marker_file_path
 
   additional_user_data = <<-EOT
     su - ec2-user << 'EOF'
@@ -166,4 +170,111 @@ resource "aws_eks_access_policy_association" "vscode_access_policy_association" 
   }
 
   depends_on = [aws_eks_access_entry.vscode_access_entry]
+}
+
+locals {
+  # Every output this project exposes, defined once. outputs.tf projects these and the README below
+  # renders them, so no value expression is written twice (rules.md B-5/H-2). Adding an entry here is
+  # what makes an output possible, which is what keeps the README from falling behind outputs.tf.
+  outputs = {
+    vscode_url = {
+      order       = 1
+      title       = "code-server"
+      description = "Open the IDE here and run every command below from its terminal. kubectl is already installed and the kubeconfig already points at the cluster"
+      value       = module.vscode_ec2.vscode_url
+    }
+    cluster_name = {
+      order       = 2
+      title       = "EKS cluster name"
+      description = "Name of the EKS cluster"
+      value       = module.eks_cluster.cluster_name
+    }
+    cluster_endpoint = {
+      order       = 3
+      title       = "EKS cluster endpoint"
+      description = "API server endpoint of the EKS cluster"
+      value       = module.eks_cluster.cluster_endpoint
+    }
+    pod_security_group_id = {
+      order       = 4
+      title       = "Pod security group"
+      description = "The security group the SecurityGroupPolicy assigns to pods. This is the point of the project: a pod gets a branch ENI carrying this group instead of inheriting the node's"
+      value       = module.pod_security_group_policy.pod_security_group_id
+    }
+    web_ec2_private_ip = {
+      order       = 5
+      title       = "Demo web instance"
+      description = "An nginx instance in a private subnet whose security group admits only the pod security group above. Reaching it from a pod is what proves the branch ENI is in effect"
+      value       = module.web_ec2.private_ip
+    }
+    pod_eni_setting_command = {
+      order       = 6
+      title       = "1. The CNI has pod ENI enabled"
+      description = "ENABLE_POD_ENI comes from the vpc-cni addon's configuration_values rather than from a kubectl set env on the DaemonSet, so it survives an addon upgrade (rules.md E-5)"
+      value       = "kubectl -n kube-system get daemonset aws-node -o jsonpath='{range .spec.template.spec.containers[0].env[*]}{.name}={.value}{\"\\n\"}{end}' | grep -E 'POD_ENI|ENFORCING'"
+    }
+    security_group_policy_command = {
+      order       = 7
+      title       = "2. The SecurityGroupPolicy exists"
+      description = "A CRD the vpc-resource-controller reconciles. It is a Terraform resource here rather than something applied by hand, which is what lets destroy remove it while that controller is still running (rules.md D-4)"
+      value       = "kubectl get securitygrouppolicy -A -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,GROUPS:.spec.securityGroups.groupIds'"
+    }
+    branch_eni_command = {
+      order       = 8
+      title       = "3. The pod got a branch ENI"
+      description = "The pod's address is on an ENI of its own, and the interface carries the pod security group rather than the node's. An empty result with a Running pod means the policy did not match its labels"
+      value       = "aws ec2 describe-network-interfaces --filters Name=interface-type,Values=branch Name=group-id,Values=${module.pod_security_group_policy.pod_security_group_id} --query 'NetworkInterfaces[].[NetworkInterfaceId,PrivateIpAddress,Status]' --output table"
+    }
+    pod_reachability_command = {
+      order       = 9
+      title       = "4. The pod can reach the instance and nothing else can"
+      description = "curl from inside the pod succeeds because the instance admits the pod security group. The same curl from a node fails, which is the whole demonstration"
+      value       = "kubectl exec demo-pod -- curl -sS -o /dev/null -w '%%{http_code}\\n' http://${module.web_ec2.private_ip}"
+    }
+    update_kubeconfig_command = {
+      order       = 10
+      title       = "Re-point kubectl"
+      description = "User data already ran this, so kubectl works out of the box. Re-run it if the kubeconfig is ever lost"
+      value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks_cluster.cluster_name}"
+    }
+  }
+  # Iterating local.outputs directly would order sections by key. Re-keying by the order field and
+  # taking values() sorts by that instead - values() returns a map's values ordered by key - so the
+  # README reads in the order the demo is run.
+  readme_ordered = values({
+    for key, entry in local.outputs : format("%02d-%s", entry.order, key) => entry
+  })
+  readme_body = join("\n", concat(
+    ["# ${var.cluster_name}", ""],
+    flatten([for entry in local.readme_ordered : [
+      "## ${entry.title}", "", entry.description, "", "```", entry.value, "```", "",
+    ]]),
+  ))
+}
+
+# The work happens inside code-server in a browser, where "terraform output" does not exist, so every
+# output above is also written to a README in the home directory the IDE opens (rules.md H-2).
+resource "aws_ssm_association" "vscode_readme" {
+  name                             = "AWS-RunShellScript"
+  wait_for_success_timeout_seconds = var.readme_timeout_seconds
+  targets {
+    key    = "InstanceIds"
+    values = [module.vscode_ec2.instance_id]
+  }
+  parameters = {
+    # The until loop, not depends_on, is what orders this after the instance bootstrap - the marker is
+    # written as the last line of user data (rules.md D-5).
+    #
+    # SSM runs as root, hence the chown. The heredoc delimiter is quoted and deliberately unlikely to
+    # appear in the body: Terraform has already substituted every value, so the shell has no reason to
+    # touch a "$" or a backtick in the README - and the commands in it contain both.
+    commands = <<-EOT
+      until [ -f ${module.vscode_ec2.marker_file_path}/userdata ]; do sleep 10; done
+      cat > /home/ec2-user/README.md << 'TFREADME'
+      ${local.readme_body}
+      TFREADME
+      chown ec2-user:ec2-user /home/ec2-user/README.md
+      touch ${module.vscode_ec2.marker_file_path}/vscode_readme
+      EOT
+  }
 }

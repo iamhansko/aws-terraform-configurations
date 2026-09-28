@@ -71,7 +71,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4). That applies to the autoscaled form too: the addon's
   # own autoscaler cannot satisfy its minimum without somewhere to put the pods.
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # metrics-server is not what drives CoreDNS autoscaling here - the addon scales on
 # cluster size, not on measured load - but it is what makes "kubectl top" work, and
@@ -84,7 +85,8 @@ module "eks_metrics_server_addon" {
 
   # Also a Deployment, so it needs node capacity for the same reason as coredns
   # (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

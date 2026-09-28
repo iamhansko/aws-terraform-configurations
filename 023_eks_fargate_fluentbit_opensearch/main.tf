@@ -94,7 +94,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE. Here that capacity is the kube-system Fargate profile, not a
   # node group (rules.md C-4).
-  depends_on = [module.eks_kubesystem_fargate_profile]
+  depends_on = [
+  module.network, module.eks_kubesystem_fargate_profile]
 }
 # The sink. The KMS key that encrypts it at rest lives in the same module: the
 # domain cannot be created without one and nothing else uses it (rules.md C-2).
@@ -136,7 +137,8 @@ module "opensearch_log_writer_role" {
   # does not order the module's resources on its own (rules.md D-2), and ordering
   # it after the domain is also what makes terraform destroy remove the mapping
   # while the domain is still up (rules.md D-4).
-  depends_on = [module.opensearch_domain]
+  depends_on = [
+  module.network, module.opensearch_domain]
 }
 # What the project is about: the namespace and ConfigMap that turn on Fargate's
 # built-in Fluent Bit log router, pointed at the domain above, plus the signing

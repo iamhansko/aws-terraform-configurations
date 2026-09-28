@@ -67,7 +67,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The controller that turns the ingress controller's Service into an NLB. Its IRSA
 # role and Helm release are one module, because the release has to annotate the
@@ -185,6 +186,7 @@ module "ingress_nginx" {
   # cloud provider claims the Service and builds a Classic Load Balancer, ignoring
   # every annotation (rules.md G-1).
   depends_on = [
+    module.network,
     module.synced_load_balancer,
     module.aws_load_balancer_controller,
     module.eks_coredns_addon,
@@ -215,7 +217,8 @@ module "cert_manager" {
 
   chart_version = var.cert_manager_chart_version
 
-  depends_on = [module.eks_node_group, module.eks_coredns_addon]
+  depends_on = [
+  module.network, module.eks_node_group, module.eks_coredns_addon]
 }
 module "rancher" {
   source = "./modules/rancher"
@@ -233,7 +236,8 @@ module "rancher" {
 
   # cert-manager for the certificate, and the ingress controller because the chart
   # waits on its own Ingress getting an address.
-  depends_on = [module.cert_manager, module.ingress_nginx]
+  depends_on = [
+  module.network, module.cert_manager, module.ingress_nginx]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

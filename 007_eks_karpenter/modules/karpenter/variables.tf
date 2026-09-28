@@ -139,6 +139,23 @@ variable "interruption_queue_name" {
     condition     = var.interruption_queue_name == null || can(regex("^[A-Za-z0-9_-]{1,80}$", var.interruption_queue_name))
     error_message = "interruption_queue_name must be a valid SQS queue name, or null."
   }
+  validation {
+    # The pair, not either value on its own: a name without an ARN gives a controller pointed at
+    # a queue it has no permission to read, which fails as a silent AccessDenied loop in its log
+    # rather than as anything plan can see (rules.md B-1).
+    condition     = var.interruption_queue_name == null || var.interruption_queue_arn != null || !var.create_controller_policy
+    error_message = "interruption_queue_arn must be set alongside interruption_queue_name, so the created controller policy can grant sqs:ReceiveMessage on that queue. Pass both from the queue module's outputs, or set create_controller_policy = false and supply your own policy."
+  }
+}
+variable "interruption_queue_arn" {
+  type        = string
+  default     = null
+  description = "ARN of the interruption queue, used to scope the controller's sqs:ReceiveMessage and sqs:DeleteMessage to that one queue. Taken separately from interruption_queue_name rather than derived from it, because deriving the ARN would put a second, independent definition of the queue's identity in this module (rules.md B-5)"
+
+  validation {
+    condition     = var.interruption_queue_arn == null || can(regex("^arn:aws:sqs:", var.interruption_queue_arn))
+    error_message = "interruption_queue_arn must be an SQS queue ARN, or null."
+  }
 }
 variable "timeout_seconds" {
   type        = number
@@ -163,10 +180,15 @@ variable "additional_set_values" {
     error_message = "additional_set_values entries must each have a non-empty name."
   }
 }
+variable "create_controller_policy" {
+  type        = bool
+  default     = true
+  description = "Whether this module creates Karpenter's least-privilege controller policy and attaches it. On, because that is what the _monolithic template carried as an inline policy - and the alternative that looks simpler, attaching AdministratorAccess, gives a controller that can already launch and terminate instances the run of the whole account. Set false only to supply a policy of your own through controller_policy_arns"
+}
 variable "controller_policy_arns" {
   type        = list(string)
-  default     = ["arn:aws:iam::aws:policy/AdministratorAccess"]
-  description = "IAM managed policy ARNs attached to the Karpenter controller's IRSA role. AdministratorAccess keeps the demo unblocked, but Karpenter publishes a least-privilege policy (see the getting-started CloudFormation template at https://karpenter.sh); use that for anything longer lived"
+  default     = []
+  description = "Additional managed policy ARNs attached to the controller's IRSA role, on top of the least-privilege policy this module creates. Empty by default: the created policy already covers everything Karpenter does, and anything added here widens it"
 
   validation {
     condition     = alltrue([for arn in var.controller_policy_arns : can(regex("^arn:aws:iam::", arn))])

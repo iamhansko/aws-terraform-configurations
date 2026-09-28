@@ -121,7 +121,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable node capacity to leave its
   # DEGRADED state and become ACTIVE, so it is created after the node groups
   # rather than before them (rules.md C-4).
-  depends_on = [module.eks_app_node_group, module.eks_addon_node_group]
+  depends_on = [
+  module.network, module.eks_app_node_group, module.eks_addon_node_group]
 }
 # The Horizontal Pod Autoscaler has no resource metrics without metrics-server,
 # so this addon is a hard prerequisite for the HPA demo below rather than an
@@ -133,7 +134,8 @@ module "eks_metrics_server_addon" {
 
   # metrics-server is a Deployment, so like coredns it needs schedulable node
   # capacity to become ACTIVE rather than DEGRADED (rules.md C-4).
-  depends_on = [module.eks_app_node_group, module.eks_addon_node_group]
+  depends_on = [
+  module.network, module.eks_app_node_group, module.eks_addon_node_group]
 }
 module "aws_load_balancer_controller" {
   source = "./modules/aws_load_balancer_controller"

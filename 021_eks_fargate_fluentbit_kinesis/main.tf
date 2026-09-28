@@ -94,7 +94,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE. Here that capacity is the kube-system Fargate profile, not a
   # node group (rules.md C-4).
-  depends_on = [module.eks_kubesystem_fargate_profile]
+  depends_on = [
+  module.network, module.eks_kubesystem_fargate_profile]
 }
 # The sink. Its own module because a Kinesis stream is a plain AWS resource that
 # anything could consume, while the logging module below only needs to be handed a

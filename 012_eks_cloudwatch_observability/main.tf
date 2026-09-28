@@ -91,7 +91,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable node capacity to leave its
   # DEGRADED state and become ACTIVE, so it is created after the node group
   # rather than before it (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "eks_metrics_server_addon" {
   source = "./modules/eks_metrics_server_addon"
@@ -100,7 +101,8 @@ module "eks_metrics_server_addon" {
 
   # metrics-server is a Deployment, so like coredns it needs schedulable node
   # capacity to become ACTIVE rather than DEGRADED (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "eks_cloudwatch_observability_addon" {
   source = "./modules/eks_cloudwatch_observability_addon"

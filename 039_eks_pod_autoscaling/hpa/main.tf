@@ -62,7 +62,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # Not optional here, unlike in the CoreDNS variants where it only makes "kubectl top"
 # work. A CPU-target HPA reads its measurements from the metrics API, so without this
@@ -75,7 +76,8 @@ module "eks_metrics_server_addon" {
 
   # Also a Deployment, so it needs node capacity for the same reason as coredns
   # (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The variant. A Deployment with a CPU request, a Service, and a HorizontalPodAutoscaler
 # holding average CPU at a target - the _monolithic template built all three with
@@ -96,7 +98,8 @@ module "php_apache_hpa" {
   # reconciles fail on missing metrics. Ordering the module after the node group also
   # makes terraform destroy remove these manifests while the nodes are still there,
   # so the deletes reach a live API server (rules.md D-4).
-  depends_on = [module.eks_node_group, module.eks_metrics_server_addon]
+  depends_on = [
+  module.network, module.eks_node_group, module.eks_metrics_server_addon]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

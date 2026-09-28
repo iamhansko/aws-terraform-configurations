@@ -67,7 +67,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The controller that turns the ingress controller's Service into an NLB. Its IRSA
 # role and Helm release are one module, because the release has to annotate the
@@ -168,6 +169,7 @@ module "ingress_nginx" {
   # cloud provider claims the Service and builds a Classic Load Balancer, ignoring
   # every annotation (rules.md G-1).
   depends_on = [
+    module.network,
     module.synced_load_balancer,
     module.aws_load_balancer_controller,
     module.eks_coredns_addon,
@@ -197,7 +199,8 @@ module "prometheus" {
   namespace     = var.kyverno_namespace
   chart_version = var.prometheus_chart_version
 
-  depends_on = [module.ingress_nginx]
+  depends_on = [
+  module.network, module.ingress_nginx]
 }
 # Grafana as a custom resource managed by an operator, which is how the original
 # did it. The operator's chart, the Grafana instance and its datasource are one
@@ -220,7 +223,8 @@ module "grafana_operator" {
   # at a service name the chart did not create (rules.md B-5).
   prometheus_url = module.prometheus.server_url
 
-  depends_on = [module.prometheus, module.ingress_nginx]
+  depends_on = [
+  module.network, module.prometheus, module.ingress_nginx]
 }
 # What the project is named after. Kyverno's dashboard ConfigMap is switched on so
 # the Grafana instance above picks it up, which is why Grafana and Prometheus are
@@ -238,7 +242,8 @@ module "kyverno" {
   # of every pod creation in the cluster, so anything installed after it has to pass
   # its policies - including the monitoring stack's own pods. Installing it last
   # keeps a restricted profile from blocking this project's own components.
-  depends_on = [module.grafana_operator, module.prometheus]
+  depends_on = [
+  module.network, module.grafana_operator, module.prometheus]
 }
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"

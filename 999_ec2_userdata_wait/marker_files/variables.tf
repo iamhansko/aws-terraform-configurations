@@ -48,3 +48,14 @@ variable "marker_file_path" {
     error_message = "marker_file_path must be an absolute path starting with '/'."
   }
 }
+
+variable "readme_timeout_seconds" {
+  type        = number
+  default     = 900
+  description = "How long the README association waits for success. It is last in the chain, so it waits out every stage before it - the 120 second sleep in user data included"
+
+  validation {
+    condition     = var.readme_timeout_seconds >= 300
+    error_message = "readme_timeout_seconds must be at least 300."
+  }
+}

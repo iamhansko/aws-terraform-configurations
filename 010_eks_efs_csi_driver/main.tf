@@ -81,7 +81,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable node capacity to leave its
   # DEGRADED state and become ACTIVE, so it is created after the node group
   # rather than before it (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The file system itself is plain AWS infrastructure with no Kubernetes in it,
 # so it is its own module: the CSI driver addon consumes nothing from it, and

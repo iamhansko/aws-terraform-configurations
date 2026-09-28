@@ -71,7 +71,8 @@ module "eks_coredns_addon" {
   # coredns is a Deployment and needs schedulable node capacity to leave its
   # DEGRADED state and become ACTIVE, so it is created after the node group
   # rather than before it (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 module "eks_ebs_csi_driver_addon" {
   source = "./modules/eks_ebs_csi_driver_addon"

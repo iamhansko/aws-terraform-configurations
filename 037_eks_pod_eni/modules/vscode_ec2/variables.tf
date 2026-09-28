@@ -89,3 +89,13 @@ variable "additional_user_data" {
   default     = ""
   description = "Additional shell script content merged in after code-server is started, appended to the base user_data script"
 }
+variable "marker_file_path" {
+  type        = string
+  default     = null
+  description = "Optional absolute directory where user data drops its completion marker as its very last action. Null creates no marker, so a caller with no SSM Association to sequence does not have to know about it (rules.md B-4)"
+
+  validation {
+    condition     = var.marker_file_path == null || can(regex("^/", var.marker_file_path))
+    error_message = "marker_file_path must be an absolute path starting with '/', or null."
+  }
+}

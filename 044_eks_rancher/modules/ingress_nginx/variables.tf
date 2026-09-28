@@ -1,6 +1,6 @@
 variable "release_name" {
   type        = string
-  description = "Helm release name. The chart derives the controller Service name from it as <release_name>-ingress-nginx-controller, which is also the second half of the stack tag a pre-created load balancer must carry to be adopted (rules.md G-3), so this value reaches AWS as configuration"
+  description = "Helm release name. This release pins the chart's fullname to it with fullnameOverride, so the controller Service is named <release_name>-controller - which is also the second half of the stack tag a pre-created load balancer must carry to be adopted (rules.md G-3), so this value reaches AWS as configuration"
 
   validation {
     condition     = can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", var.release_name))
@@ -19,7 +19,7 @@ variable "namespace" {
 }
 variable "service_name" {
   type        = string
-  description = "Name of the controller Service the chart will create, which is <release_name>-ingress-nginx-controller. Passed in rather than derived here because the caller has to build the matching load balancer stack tag before this release runs, and deriving it in both places is how the two drift apart (rules.md B-5)"
+  description = "Name of the controller Service the chart will create, which is <release_name>-controller. Passed in rather than derived here because the caller has to build the matching load balancer stack tag before this release runs, and deriving it in both places is how the two drift apart (rules.md B-5)"
 
   validation {
     condition     = can(regex("^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$", var.service_name))

@@ -119,7 +119,8 @@ module "eks_coredns_addon" {
 
   # coredns is a Deployment and needs schedulable capacity to leave DEGRADED and
   # become ACTIVE (rules.md C-4).
-  depends_on = [module.eks_node_group]
+  depends_on = [
+  module.network, module.eks_node_group]
 }
 # The role only. The chart is installed by an SSM step further down, because a helm
 # provider on the machine running terraform apply cannot reach this cluster's
@@ -130,7 +131,8 @@ module "aws_load_balancer_controller_iam_role" {
   oidc_provider_arn = module.eks_cluster.oidc_provider_arn
   oidc_issuer_host  = module.eks_cluster.oidc_issuer_host
 
-  depends_on = [module.eks_cluster]
+  depends_on = [
+  module.network, module.eks_cluster]
 }
 # Standalone rule resources rather than inline blocks, and revoke_rules_on_delete,
 # because the controller adds its own rules to this group (rules.md F-2).
