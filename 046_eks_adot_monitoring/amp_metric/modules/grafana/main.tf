@@ -14,7 +14,17 @@ locals {
   deployment_name      = "${var.name}-deployment"
   service_name         = "${var.name}-service"
   service_account_name = "${var.name}-sa"
-  admin_secret_name    = "${var.name}-admin-credentials"
+  # Not a name this module is free to choose. The operator hardcodes "<instance>-admin-credentials"
+  # and injects an env pair referencing it into every container of the Deployment it builds - it does
+  # that unconditionally, so the Secret has to exist under exactly this name whether the operator
+  # creates it or not.
+  admin_secret_name = "${var.name}-admin-credentials"
+  # And not keys this module is free to choose either: the env the operator injects reads these two
+  # exact keys. A Secret of the right name holding differently named keys is what produces
+  # CreateContainerConfigError on the grafana-deployment pod - the object exists, so nothing reports a
+  # missing Secret, and the pod never starts (rules.md B-5).
+  admin_user_key     = "GF_SECURITY_ADMIN_USER"
+  admin_password_key = "GF_SECURITY_ADMIN_PASSWORD"
   # The label the operator matches an instance against. A GrafanaDatasource whose
   # instanceSelector matches nothing is accepted by the API server and reconciled into
   # nothing - the data source simply never appears in the UI.
@@ -114,6 +124,12 @@ resource "helm_release" "grafana_operator" {
 # plan output and in state's plaintext rendering of the manifest, as well as being readable
 # to anyone with get access to that object. Going through a Secret means the manifest below
 # carries only a reference.
+#
+# The name and both key names belong to the operator, not to this module - see the locals above. The
+# instance sets disableDefaultAdminSecret, so the operator does not write to this object and Terraform
+# is its only owner. Without that flag the operator's own reconciler would run CreateOrUpdate against
+# the same Secret and replace its whole data map with its two keys, which is a second writer on one
+# object for no benefit.
 resource "kubectl_manifest" "admin_secret" {
   # Marked sensitive by the provider for kind: Secret, so the values do not render in plan.
   yaml_body = yamlencode({
@@ -125,8 +141,8 @@ resource "kubectl_manifest" "admin_secret" {
     }
     type = "Opaque"
     stringData = {
-      admin_user     = var.admin_user
-      admin_password = local.admin_password
+      (local.admin_user_key)     = var.admin_user
+      (local.admin_password_key) = local.admin_password
     }
   })
 
@@ -147,6 +163,11 @@ resource "kubectl_manifest" "grafana" {
     spec = merge(
       var.grafana_version == null ? {} : { version = var.grafana_version },
       {
+        # Stops the operator's own reconciler from creating and rewriting
+        # <name>-admin-credentials, which kubectl_manifest.admin_secret above owns instead. The
+        # operator still injects the env pair that reads that Secret - that part is not
+        # conditional - so this only decides who writes the object, not whether it is used.
+        disableDefaultAdminSecret = true
         config = {
           log = {
             mode = "console"
@@ -192,24 +213,17 @@ resource "kubectl_manifest" "grafana" {
                       name  = "GF_INSTALL_PLUGINS"
                       value = var.datasource_plugin
                     },
-                    {
-                      name = "GF_SECURITY_ADMIN_USER"
-                      valueFrom = {
-                        secretKeyRef = {
-                          name = local.admin_secret_name
-                          key  = "admin_user"
-                        }
-                      }
-                    },
-                    {
-                      name = "GF_SECURITY_ADMIN_PASSWORD"
-                      valueFrom = {
-                        secretKeyRef = {
-                          name = local.admin_secret_name
-                          key  = "admin_password"
-                        }
-                      }
-                    },
+                    # No GF_SECURITY_ADMIN_USER or GF_SECURITY_ADMIN_PASSWORD here. The operator
+                    # appends that pair to every container itself, pointing at
+                    # <name>-admin-credentials, and it does so after this list - so declaring them
+                    # here produced two entries per variable in the built Deployment.
+                    #
+                    # Kubelet resolves every env source including duplicates, so the pod failed with
+                    # CreateContainerConfigError on the keys this module used to write. And the
+                    # operator's Grafana API client reads the credential back out of the Deployment's
+                    # env without stopping at the first match, so the later entry - the operator's -
+                    # decided what it tried to log in with. Owning the Secret's contents and letting
+                    # the operator own the env reference leaves one of each.
                   ]
                 }]
               }

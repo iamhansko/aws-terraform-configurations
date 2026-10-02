@@ -277,6 +277,27 @@ resource "aws_iam_policy" "karpenter_controller_policy" {
         Action   = "iam:GetInstanceProfile"
       },
       {
+        # Unscoped deliberately, and the only statement in this policy that has to be. The
+        # instanceprofile.garbagecollection controller lists the account's instance profiles to
+        # find the ones whose EC2NodeClass is gone, and iam:ListInstanceProfiles takes no
+        # resource - so the instance-profile/* ARN above does not authorise it, and adding the
+        # action to that statement instead leaves the call denied.
+        #
+        # Without this the controller returns AccessDenied on every reconcile and orphaned
+        # instance profiles are never collected. Provisioning keeps working, so nothing surfaces
+        # it except the controller log:
+        #
+        #   controller: instanceprofile.garbagecollection ... api error AccessDenied: ... not
+        #     authorized to perform: iam:ListInstanceProfiles
+        #
+        # Carried by the upstream cloudformation.yaml for this chart version as
+        # AllowUnscopedInstanceProfileListAction.
+        Sid      = "AllowUnscopedInstanceProfileListAction"
+        Effect   = "Allow"
+        Resource = "*"
+        Action   = "iam:ListInstanceProfiles"
+      },
+      {
         Sid      = "AllowAPIServerEndpointDiscovery"
         Effect   = "Allow"
         Resource = "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:cluster/${var.cluster_name}"

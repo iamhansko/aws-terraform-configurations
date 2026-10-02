@@ -512,14 +512,26 @@ locals {
       description = "Where a SigV4 signature AMP rejected, or a failed plugin install, appears. The data source page reports only that the query failed"
       value       = module.grafana.grafana_log_command
     }
-    collector_log_command = {
+    grafana_admin_env_command = {
       order       = 21
+      title       = "If the Grafana pod is in CreateContainerConfigError"
+      description = "It means an env source could not be resolved, and here that is always the admin credential. Exactly one entry per variable is correct: the operator injects the pair itself, pointing at <instance>-admin-credentials, so anything that also declares it produces a duplicate - and kubelet resolves every source including duplicates"
+      value       = module.grafana.admin_env_check_command
+    }
+    grafana_admin_secret_keys_command = {
+      order       = 22
+      title       = "...and check the Secret holds the keys it reads"
+      description = "GF_SECURITY_ADMIN_USER and GF_SECURITY_ADMIN_PASSWORD, exactly. The operator hardcodes both the Secret name and these key names, so a Secret of the right name with different keys exists as far as Kubernetes is concerned and the pod still never starts"
+      value       = module.grafana.admin_secret_keys_command
+    }
+    collector_log_command = {
+      order       = 23
       title       = "10. Read the collector's log"
       description = "The other end of the same question. An AccessDenied from AMP or CloudWatch appears here and nowhere else - the collector stays Running either way"
       value       = module.eks_adot_addon.collector_log_command
     }
     update_kubeconfig_command = {
-      order       = 22
+      order       = 24
       title       = "Re-point kubectl"
       description = "User data already ran this, so kubectl works out of the box. Re-run it if the kubeconfig is ever lost"
       value       = "aws eks update-kubeconfig --region ${data.aws_region.current.region} --name ${module.eks_cluster.cluster_name}"

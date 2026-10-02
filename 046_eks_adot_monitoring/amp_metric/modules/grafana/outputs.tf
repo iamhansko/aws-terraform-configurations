@@ -19,12 +19,12 @@ output "admin_user" {
   description = "Administrator login name. Not sensitive on its own; the password is not exposed here at all"
 }
 output "admin_secret_name" {
-  value       = "${var.name}-admin-credentials"
-  description = "Kubernetes Secret the credential is read from. Grafana takes both values as environment variables from it, rather than having them written into the custom resource where they would appear in plan (rules.md H-2)"
+  value       = local.admin_secret_name
+  description = "Kubernetes Secret the credential is read from. Both its name and its two key names are fixed by the operator, which injects an env pair referencing them into the Deployment it builds - a Secret of the right name holding differently named keys leaves the pod in CreateContainerConfigError"
 }
 output "admin_password_command" {
   value = var.secrets_manager_name == null ? (
-    "kubectl -n ${var.namespace} get secret ${var.name}-admin-credentials -o jsonpath='{.data.admin_password}' | base64 -d ; echo"
+    "kubectl -n ${var.namespace} get secret ${local.admin_secret_name} -o jsonpath='{.data.${local.admin_password_key}}' | base64 -d ; echo"
     ) : (
     "aws secretsmanager get-secret-value --secret-id ${var.secrets_manager_name} --query SecretString --output text"
   )
@@ -49,4 +49,17 @@ output "operator_log_command" {
 output "grafana_log_command" {
   value       = "kubectl -n ${var.namespace} logs deploy/${var.name}-deployment --tail 100"
   description = "Grafana's own log. A SigV4 signature AMP rejects, or a failed plugin install, appears here and nowhere else - the data source page reports only that the query failed"
+}
+
+output "admin_env_check_command" {
+  # The env the operator actually built, not the env this module asked for. Two entries per variable
+  # here means something is declaring the pair the operator already injects, which is what leaves the
+  # pod in CreateContainerConfigError.
+  value       = "kubectl -n ${var.namespace} get deployment ${local.deployment_name} -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{\" <- \"}{.valueFrom.secretKeyRef.name}{\"/\"}{.valueFrom.secretKeyRef.key}{\"\\n\"}{end}' | grep GF_SECURITY"
+  description = "Lists the admin credential environment variables on the built Deployment and the Secret keys they resolve to. Exactly one entry per variable is correct; a duplicate, or a key the Secret does not hold, is what CreateContainerConfigError means here"
+}
+
+output "admin_secret_keys_command" {
+  value       = "kubectl -n ${var.namespace} get secret ${local.admin_secret_name} -o jsonpath='{range $k, $v := .data}{$k}{\"\\n\"}{end}'"
+  description = "The keys the Secret actually holds. They have to be exactly the two the operator's injected env reads, which is why this module does not get to name them"
 }
