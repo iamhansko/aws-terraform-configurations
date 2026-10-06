@@ -27,7 +27,11 @@ resource "aws_security_group" "bastion_ec2_security_group" {
 }
 
 resource "aws_iam_role" "bastion_ec2_iam_role" {
-  name = "Ec2PowerUserRole"
+  # name_prefix, not name. IAM role names are account-wide, and 001, 002, 003 and
+  # 093_ai_streamable_http_lambda_mcp_server all declared this same literal - so the second of them applied
+  # into an account failed on EntityAlreadyExists. Nothing refers to the role by a literal name; the
+  # attachments and the instance profile below take .name from this resource (rules.md G-3).
+  name_prefix = "Ec2PowerUserRole-"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -47,7 +51,8 @@ resource "aws_iam_role_policy_attachment" "bastion_ec2_iam_role" {
 }
 
 resource "aws_iam_instance_profile" "bastion_ec2_instance_profile" {
-  name = "Ec2PowerUserProfile"
+  # Same reasoning as the role above: an account-wide name shared by four projects.
+  name_prefix = "Ec2PowerUserProfile-"
   role = aws_iam_role.bastion_ec2_iam_role.name
 }
 
