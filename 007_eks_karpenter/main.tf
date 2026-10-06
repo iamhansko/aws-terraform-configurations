@@ -247,9 +247,15 @@ module "vscode_cloudfront" {
   origin_domain_name = module.vscode_ec2.public_dns
   # Taken from the instance module rather than restating 8000, so the origin
   # port cannot drift from what code-server binds to (rules.md B-5).
-  origin_http_port  = module.vscode_ec2.code_server_port
-  cache_policy_name = "${var.prefix}-vscode-code-server"
-  comment           = "code-server on ${var.prefix} bastion"
+  origin_http_port = module.vscode_ec2.code_server_port
+  # The stem of a generated name, not the name. This project, 016_eks_argocd_github_action and
+  # 017_eks_argorollouts_bluegreen all built the same "${var.prefix}-vscode-code-server" string with the same
+  # default prefix, and cache policy names are unique per account - so the second of them applied into an
+  # account failed on CachePolicyAlreadyExists, partway through, with the VPC, the cluster and the instance
+  # already built. Nothing reads the policy by name, so there was nothing to lose by generating it
+  # (rules.md G-3).
+  cache_policy_name_prefix = "${var.prefix}-vscode-code-server"
+  comment                  = "code-server on ${var.prefix} bastion"
 
   depends_on = [module.network]
 }

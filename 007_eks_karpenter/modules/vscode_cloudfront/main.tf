@@ -4,8 +4,22 @@
 # security group allowing inbound only from the
 # com.amazonaws.global.cloudfront.origin-facing managed prefix list, so the
 # origin is unreachable except through the distribution.
+# Suffix that makes the cache policy name unique in the account.
+#
+# Created unconditionally rather than under a count, so that the name expression below stays a plain
+# conditional: a zero-instance resource cannot be indexed, and both branches of a conditional are evaluated.
+# It holds no AWS resource, so the only cost is a line in state.
+resource "random_id" "cache_policy_suffix" {
+  byte_length = 4
+}
+locals {
+  # Generated unless the caller pinned a name. Nothing reads this policy by name - the distribution below
+  # references its id - so there is nothing for a predictable name to buy, while an account-unique namespace
+  # makes a fixed one collide (rules.md G-3).
+  cache_policy_name = var.cache_policy_name != null ? var.cache_policy_name : "${var.cache_policy_name_prefix}-${random_id.cache_policy_suffix.hex}"
+}
 resource "aws_cloudfront_cache_policy" "vscode_cache_policy" {
-  name        = var.cache_policy_name
+  name        = local.cache_policy_name
   comment     = "Forwards the headers, cookies and query strings code-server needs, including its websocket upgrade"
   default_ttl = var.default_ttl
   min_ttl     = var.min_ttl

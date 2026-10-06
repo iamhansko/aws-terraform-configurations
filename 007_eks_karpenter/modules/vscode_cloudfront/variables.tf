@@ -17,14 +17,44 @@ variable "origin_http_port" {
     error_message = "origin_http_port must be a valid TCP port."
   }
 }
-variable "cache_policy_name" {
+variable "cache_policy_name_prefix" {
   type        = string
   default     = "vscode-code-server"
-  description = "Name of the cache policy created for the distribution. Must be unique within the account, so change it when deploying this project twice"
+  description = <<-DESC
+    Readable stem of the generated cache policy name. A unique suffix is appended to it.
+
+    The suffix is not decoration. CloudFront cache policy names are unique per account - not per region, since
+    CloudFront is global - and nothing references this policy by name: the distribution takes its id. So the
+    name is a console label with an account-wide uniqueness constraint attached, which is the worst of both
+    and the reason it is generated rather than fixed (rules.md G-3).
+  DESC
 
   validation {
-    condition     = can(regex("^[0-9A-Za-z_-]{1,128}$", var.cache_policy_name))
-    error_message = "cache_policy_name must contain only letters, digits, hyphens and underscores (128 characters or fewer)."
+    # Shorter than the 128 the API allows, to leave room for the suffix.
+    condition     = can(regex("^[0-9A-Za-z_-]{1,100}$", var.cache_policy_name_prefix))
+    error_message = "cache_policy_name_prefix must be 1-100 characters of letters, digits, hyphens and underscores, leaving room for the generated suffix."
+  }
+}
+variable "cache_policy_name" {
+  type        = string
+  default     = null
+  description = <<-DESC
+    Exact cache policy name, overriding the generated one. Null generates it from
+    cache_policy_name_prefix.
+
+    Pinning it means this project cannot be deployed twice in one account, and cannot coexist with another
+    project that pins the same name. That is not hypothetical: 007_eks_karpenter, 016_eks_argocd_github_action
+    and this project all built the name as "<prefix>-vscode-code-server" with prefix defaulting to "eks", so
+    the second of them to be applied failed with
+
+      CachePolicyAlreadyExists: Another cache policy with the same name already exists within the aws account
+
+    partway through an apply, after the VPC, the cluster and the instance were already built.
+  DESC
+
+  validation {
+    condition     = var.cache_policy_name == null || can(regex("^[0-9A-Za-z_-]{1,128}$", var.cache_policy_name))
+    error_message = "cache_policy_name must contain only letters, digits, hyphens and underscores (128 characters or fewer), or be null to generate a unique name."
   }
 }
 variable "comment" {
