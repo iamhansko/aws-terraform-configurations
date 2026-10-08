@@ -18,7 +18,7 @@
 # conversion, and app_secret/outputs.tf records what it does and does not fix.
 output "rdp_endpoint" {
   value       = module.windows_ec2.rdp_endpoint
-  description = "Address and port to put into the RDP client, reproducing the _monolithic template's 01RdpUrl output. It answers within a minute of apply and that means nothing: the account you are about to log in as does not exist for several more minutes, and the instance reboots once at the end. Use rdp_status_command to tell waiting from broken"
+  description = "Address and port to put into the RDP client, reproducing the _monolithic template's 01RdpUrl output. It answers within a minute of apply and that means nothing: the account you are about to log in as does not exist for several more minutes, and the instance reboots once at the end. The rdp_status check in setup_check_results_command tells waiting from broken"
 }
 output "workshop_username" {
   value       = module.windows_ec2.workshop_username
@@ -36,17 +36,13 @@ output "instance_id" {
   value       = module.windows_ec2.instance_id
   description = "ID of the instance, for describe-instances, get-password-data and start-session"
 }
-output "rdp_status_command" {
-  value       = module.windows_ec2.rdp_status_command
-  description = "Whether RDP is listening and the workshop account exists yet. The readiness test that matters, because the port answering does not mean the setup has run"
+output "setup_check_results_command" {
+  value       = module.windows_ec2.setup_check_results_command
+  description = "What the three readiness check associations printed: setup_log (the tail of the setup log and the status marker), rdp_status (Terminal Services, the workshop account, the RDP listener) and app_status (the launcher scripts and the clone, and whether the game server and client are listening). They run on their own once the instance registers with SSM, about a quarter of an hour after apply returns, so this sends nothing to the instance. Apply does not wait for them - an error before then means there is no execution yet, not that the setup failed. First thing to read when RDP rejects the password: every step of the setup runs inside a try block, so a failure appears as the log stopping rather than as anything Terraform reported"
 }
-output "setup_log_command" {
-  value       = module.windows_ec2.setup_log_command
-  description = "The tail of the setup log on the instance. First thing to read when RDP rejects the password: every step of the script runs inside a try block, so a failure appears as the log stopping rather than as anything Terraform reported"
-}
-output "app_status_command" {
-  value       = module.windows_ec2.app_status_command
-  description = "Whether the clone and the launcher scripts exist, and whether the game server and client are listening. The last two stay False until someone logs in and runs the desktop shortcuts, which nothing does automatically"
+output "setup_check_association_ids" {
+  value       = module.windows_ec2.setup_check_association_ids
+  description = "ID of each readiness check association. aws ssm start-associations-once --association-ids <id> runs one again - app_status after starting the game server, for instance"
 }
 output "private_key_command" {
   value       = module.key_pair.private_key_command

@@ -427,6 +427,50 @@ variable "additional_user_data" {
     error_message = "additional_user_data must not contain a carriage return. It is interpolated into a PowerShell script, where a \\r makes every here-string terminator and block keyword fail to match, so the whole script fails to parse and no line of the setup runs (rules.md A-4)."
   }
 }
+variable "setup_log_tail_lines" {
+  type        = number
+  default     = 40
+  description = "How many lines from the end of the setup log the setup_log check association prints. The whole log of a successful run is about 30 lines"
+
+  validation {
+    condition     = var.setup_log_tail_lines >= 1 && floor(var.setup_log_tail_lines) == var.setup_log_tail_lines
+    error_message = "setup_log_tail_lines must be a whole number of at least 1."
+  }
+}
+variable "setup_wait_seconds" {
+  type        = number
+  default     = 2400
+  description = <<-DESC
+    How long each setup_check association waits on the instance for the setup script's status marker
+    before checking anyway. setup_log then fails on the missing marker; rdp_status and app_status
+    report what exists at that point.
+
+    Counted from when the command starts on the instance, which is when SSM Agent first registers. So
+    far that has been after the setup's reboot, with nothing left to wait for; if the agent comes up
+    earlier, a complete setup takes about ten minutes (Chocolatey, Git, the AWS CLI, Node, Python, bun
+    and the Kiro IDE all download at boot), and 40 minutes leaves room for slow package mirrors without
+    hiding a hung step for long.
+  DESC
+
+  validation {
+    # The upper bound keeps executionTimeout (this plus 120) inside the
+    # 172800 seconds AWS-RunPowerShellScript accepts.
+    condition     = var.setup_wait_seconds >= 60 && var.setup_wait_seconds <= 172680
+    error_message = "setup_wait_seconds must be between 60 and 172680, so that the command's executionTimeout - this value plus 120 - stays within the 172800 seconds AWS-RunPowerShellScript accepts."
+  }
+}
+variable "association_name_prefix" {
+  type        = string
+  default     = "windows"
+  description = "Prefix for the names of the setup_check associations, which become <prefix>-setup-log, <prefix>-rdp-status and <prefix>-app-status. A name is what tells the three apart in the State Manager console, where each otherwise shows only as AWS-RunPowerShellScript and an id"
+
+  validation {
+    # State Manager accepts 3-128 characters from this set; 100 leaves room for
+    # the longest suffix added in main.tf.
+    condition     = can(regex("^[a-zA-Z0-9_.-]{1,100}$", var.association_name_prefix))
+    error_message = "association_name_prefix must be 1-100 letters, digits, underscores, hyphens or dots - the characters State Manager accepts in an association name, which is at most 128 characters including the suffix this module adds."
+  }
+}
 variable "user_data_replace_on_change" {
   type        = bool
   default     = true

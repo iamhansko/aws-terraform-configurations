@@ -50,26 +50,35 @@ output "user_data_byte_length" {
   value       = length(local.user_data)
   description = "Size of the rendered setup script. EC2 rejects anything over 16384, and this reproduction of the _monolithic template's script already takes about 15 KB - so this is the headroom for anything added through additional_user_data. Watch it rather than discovering the limit during an apply"
 }
-# Three commands, because none of what matters here is knowable to Terraform.
-# apply returns as soon as EC2 accepts the launch, and the script above then runs
-# for several minutes - installing Chocolatey, Git, the AWS CLI, Node, Python,
-# bun and the Kiro IDE, cloning the project, and finally rebooting. The instance
-# is up and RDP answers long before any of that is true, so "can I connect" is a
-# bad readiness test and these are the real ones.
+# None of what matters here is knowable to Terraform. apply returns as soon as
+# EC2 accepts the launch, and the script above then runs for several minutes -
+# installing Chocolatey, Git, the AWS CLI, Node, Python, bun and the Kiro IDE,
+# cloning the project, and finally rebooting. The instance is up and RDP answers
+# long before any of that is true, so "can I connect" is a bad readiness test.
+# The real ones are the setup_check associations in main.tf, which run on their
+# own; these two outputs only say where their results are.
+output "setup_check_association_ids" {
+  value       = { for key, association in aws_ssm_association.setup_check : key => association.association_id }
+  description = "ID of each readiness check association, keyed setup_log, rdp_status and app_status. For aws ssm start-associations-once, to run a check again"
+}
+# Three calls per check, because State Manager does not keep the output on the
+# association itself: an execution points at execution targets, and each target
+# points at the Run Command invocation that holds the output (the same chain
+# rules.md A-4 walks when an association fails). The first execution is the
+# newest. Joined with ";" rather than "&&" so a check that has not run yet does
+# not hide the ones that have.
 #
-# All three go through SSM rather than RDP, which also means a failed one tells
-# you something: SSM Agent registers only once the instance has outbound
-# internet, so a command that cannot find the instance is the egress symptom the
-# security group comment describes.
-output "setup_log_command" {
-  value       = "cid=$(aws ssm send-command --instance-ids ${aws_instance.windows_ec2.id} --document-name AWS-RunPowerShellScript --parameters 'commands=[\"Get-Content ${var.workshop_dir}\\setup.log -Tail 40\"]' --query Command.CommandId --output text) && sleep 8 && aws ssm get-command-invocation --command-id $cid --instance-id ${aws_instance.windows_ec2.id} --query StandardOutputContent --output text"
-  description = "The last 40 lines of the setup log the script writes as it goes. This is the first thing to read when RDP rejects the password: every step runs inside a try block, so a failure appears here as the log simply stopping rather than as anything Terraform reported"
-}
-output "rdp_status_command" {
-  value       = "cid=$(aws ssm send-command --instance-ids ${aws_instance.windows_ec2.id} --document-name AWS-RunPowerShellScript --parameters 'commands=[\"(Get-Service TermService).Status; (Get-LocalUser ${var.workshop_username}).Enabled; (Test-NetConnection -ComputerName localhost -Port ${var.rdp_port}).TcpTestSucceeded\"]' --query Command.CommandId --output text) && sleep 8 && aws ssm get-command-invocation --command-id $cid --instance-id ${aws_instance.windows_ec2.id} --query StandardOutputContent --output text"
-  description = "Three lines: the Terminal Services state, whether the workshop account exists, and whether 3389 is listening. Running, True, True is ready. Running plus an error on the second line is the case to recognise - RDP is up and the account was never created, which means the script failed before New-LocalUser"
-}
-output "app_status_command" {
-  value       = "cid=$(aws ssm send-command --instance-ids ${aws_instance.windows_ec2.id} --document-name AWS-RunPowerShellScript --parameters 'commands=[\"Test-Path ${var.workshop_dir}\\temp\\server.ps1; Test-Path ${var.workshop_dir}\\${var.git_clone_branch}; (Test-NetConnection -ComputerName localhost -Port ${var.game_server_port}).TcpTestSucceeded; (Test-NetConnection -ComputerName localhost -Port ${var.client_dev_port}).TcpTestSucceeded\"]' --query Command.CommandId --output text) && sleep 8 && aws ssm get-command-invocation --command-id $cid --instance-id ${aws_instance.windows_ec2.id} --query StandardOutputContent --output text"
-  description = "Whether the launcher scripts and the clone exist, and whether the game server and client are listening. The last two are False until a person logs in and runs the desktop shortcuts - nothing starts them automatically, so False there is the expected state and not a failure"
+# Nothing here sends a command to the instance. An error from this before the
+# instance registers with SSM - about a quarter of an hour after apply returns -
+# means there is no execution yet, not that the setup failed; and a check that
+# never runs at all is the egress symptom the security group comment describes,
+# because SSM Agent registers only once the instance has outbound internet.
+output "setup_check_results_command" {
+  value = join(" ; ", [for check in local.setup_checks : join(" && ", [
+    "echo '== ${check.key} =='",
+    "eid=$(aws ssm describe-association-executions --association-id ${aws_ssm_association.setup_check[check.key].association_id} --query 'AssociationExecutions[0].ExecutionId' --output text)",
+    "cid=$(aws ssm describe-association-execution-targets --association-id ${aws_ssm_association.setup_check[check.key].association_id} --execution-id $eid --query 'AssociationExecutionTargets[0].OutputSource.OutputSourceId' --output text)",
+    "aws ssm get-command-invocation --command-id $cid --instance-id ${aws_instance.windows_ec2.id} --query '[Status,StandardOutputContent]' --output text",
+  ])])
+  description = "What each readiness check association printed, in order: setup_log, rdp_status, app_status. For each, the invocation status first - Success, Failed, or InProgress while it is still waiting for the setup to finish - then its output"
 }

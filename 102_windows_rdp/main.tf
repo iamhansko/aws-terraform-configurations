@@ -77,6 +77,7 @@ module "windows_ec2" {
   key_name  = module.key_pair.key_name
 
   instance_name              = var.project_name
+  association_name_prefix    = var.project_name
   instance_type              = var.instance_type
   root_volume_size           = var.root_volume_size
   security_group_name        = "${var.project_name}-sg"

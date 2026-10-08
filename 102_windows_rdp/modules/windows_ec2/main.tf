@@ -134,7 +134,8 @@ resource "aws_iam_instance_profile" "windows_ec2_instance_profile" {
 # The one cost is a blank line where additional_user_data would go when it is
 # null.
 #
-# What differs from the conversion, in the order it appears:
+# What differs from the conversion - 1 to 6 in the order they appear in the
+# script, 7 and 8 added later:
 #
 #   1. The secret id is quoted. The conversion passed the ARN as a bare token,
 #      and a Secrets Manager ARN is full of colons, which PowerShell reads as the
@@ -174,6 +175,33 @@ resource "aws_iam_instance_profile" "windows_ec2_instance_profile" {
 #      Windows the binary ships in the AMI, so the call did not even fail
 #      loudly: it exited non-zero against a ValidationError and the script went
 #      straight on to the shutdown.
+#   7. A status marker, written where the cfn-signal calls used to be: "failed"
+#      in the catch block before the throw, "completed" right before the
+#      shutdown. It is what the setup_check associations below wait for - the
+#      same job the signal did for CreationPolicy, with something now actually
+#      listening (rules.md D-5). "completed" means the script reached its end,
+#      not that every step worked: with $ErrorActionPreference at Continue most
+#      failures do not reach the catch block, which is why the associations
+#      print the log and check the account and the files rather than only
+#      reading the status.
+#   8. The Chocolatey installer runs in a child scope - & ([scriptblock]::Create(...))
+#      - rather than through iex. iex evaluates it in this script's scope, and
+#      install.ps1 assigns $tempDir at its top level; PowerShell variable names
+#      are case-insensitive, so that overwrote $TempDir with
+#      C:\Users\Administrator\AppData\Local\Temp\chocolatey\chocoInstall. The
+#      virtualenv, init.py, the Kiro installer and both launcher scripts all
+#      landed there. The conversion made that visible: the template wrote
+#      server.ps1 and client.ps1 to literal paths and survived it, the
+#      conversion wrote them to "$TempDir\..." and did not - so the logon
+#      script's Test-Path on ${var.workshop_dir}\temp\server.ps1 came back
+#      false, and the desktop got Kiro IDE and Workshop Project but never
+#      01 GameServer or 02 GameClient. Nothing failed; the files existed, in
+#      the Administrator profile, where the workshop account cannot see them.
+#      The bun installer gets the same treatment for a quieter reason: it
+#      assigns $ErrorActionPreference = "Stop" at its top level, which under iex
+#      silently turned every later non-terminating error in this script into a
+#      jump to the catch block. The two launcher scripts still use iex for bun;
+#      each is its own process and has nothing after the install to protect.
 #
 # And one thing reproduced rather than fixed: the logon script is registered
 # under HKLM, which is every user's Run key rather than the workshop account's,
@@ -187,12 +215,17 @@ resource "aws_iam_instance_profile" "windows_ec2_instance_profile" {
 locals {
   user_data_max_bytes = 16384
 
+  # Defined once and read by the setup script and by the setup_check associations
+  # that wait on it, so the two cannot name different files.
+  setup_log_path    = "${var.workshop_dir}\\setup.log"
+  setup_status_path = "${var.workshop_dir}\\setup.status"
+
   user_data = <<-EOT
     <powershell>
     # Kiro Workshop Windows Setup - Simplified
     $ErrorActionPreference = "Continue"
     $ProgressPreference = 'SilentlyContinue'
-    $LogFile = "${var.workshop_dir}\setup.log"
+    $LogFile = "${local.setup_log_path}"
     New-Item -ItemType Directory -Path "${var.workshop_dir}" -Force
 
     function Write-Log {
@@ -279,7 +312,7 @@ locals {
         Write-Log "Installing Chocolatey..."
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        & ([scriptblock]::Create((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')))
 
         # Install development tools via Chocolatey
         Write-Log "Installing Git..."
@@ -347,7 +380,7 @@ locals {
             Write-Log "Running project setup commands..."
 
             # Install Bun and run npm commands
-            irm bun.sh/install.ps1 | iex
+            & ([scriptblock]::Create((irm bun.sh/install.ps1)))
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
             Write-Log "Project setup completed"
@@ -493,9 +526,11 @@ locals {
     ${var.additional_user_data == null ? "" : var.additional_user_data}
     } catch {
         Write-Log "Setup failed: $($_.Exception.Message)"
+        Set-Content -Path "${local.setup_status_path}" -Value "failed"
         throw
     }
 
+    Set-Content -Path "${local.setup_status_path}" -Value "completed"
     shutdown /r /t ${var.reboot_delay_seconds} /c "Kiro Workshop setup completed"
     </powershell>
     EOT
@@ -569,5 +604,139 @@ resource "aws_instance" "windows_ec2" {
       condition     = length(local.user_data) <= local.user_data_max_bytes
       error_message = "Rendered user_data exceeds the 16384 bytes EC2 accepts. Shorten additional_user_data or workshop_dir - the script reproduced from the _monolithic template already takes about 15 KB of that budget."
     }
+  }
+}
+# ---------------------------------------------------------------------------
+# The readiness checks, run by State Manager rather than handed out as
+# send-command one-liners.
+#
+# Each association below runs once on its own, as soon as the instance registers
+# with SSM after the first apply: nobody has to copy a command out of the
+# outputs. Every check that used to be an output is one of them -
+#
+#   setup_log   the tail of the setup log and the status marker. Fails unless
+#               the marker says "completed".
+#   rdp_status  Terminal Services, the workshop account and the RDP listener.
+#               Fails unless all three are ready - Running plus a missing
+#               account is the case to recognise: RDP answers and the script
+#               failed before New-LocalUser.
+#   app_status  the launcher scripts and the clone, and whether the game server
+#               and client are listening. Fails only on the first two; the last
+#               two are False until a person logs in and runs the desktop
+#               shortcuts, which nothing does automatically.
+#
+# so the association status in State Manager is the verdict, and the output
+# printed alongside it is the reason. setup_check_results_command reads both.
+#
+# All three wait for the same status marker before checking anything, with a
+# loop rather than depends_on: depends_on only orders the creation of an
+# association against the instance's and says nothing about the script running
+# inside it (rules.md D-5). In every run observed so far SSM Agent came online
+# only after the setup's own reboot - eleven to thirteen minutes after launch -
+# so the marker was already there and each command took a second. The loop is
+# for the case where the agent registers earlier, and it polls every two seconds
+# because the marker is written five seconds before that reboot. SSM documents
+# that a reboot it did not ask for (exit 3010) can leave a command's status
+# wrong, and these associations cannot ask for that one - which is why every
+# check after the wait has to finish inside those five seconds, and why the
+# listeners are read with Get-NetTCPConnection rather than the
+# Test-NetConnection the old outputs used. On a port nothing listens on,
+# Test-NetConnection falls back to an ICMP test and takes about ten seconds;
+# Get-NetTCPConnection reads the listener table in a fraction of one. It also
+# answers the question that was being asked - whether anything listens - rather
+# than whether a loopback connect succeeds.
+#
+# The three checks are independent reads of the same finished state, so they
+# do not wait on each other and need no marker of their own.
+#
+# Apply does not wait for any of them, and wait_for_success_timeout_seconds is
+# deliberately not set. Right after creation an association reports
+# Overview.Status "Success" with no target counted at all, because the instance
+# has not registered yet; the provider's waiter (Pending -> Success) accepts
+# that, and an apply with the setting returned "Creation complete after 1s". It
+# would only have claimed a wait that does not happen - the provider issue
+# rules.md D-5 already records.
+#
+# An association with no schedule runs once per target and is not repeated by
+# later applies. It runs again when its parameters change, or on demand with
+# aws ssm start-associations-once - useful for app_status after starting the
+# game server by hand.
+#
+# OutputEncoding first because this is a Korean-language AMI by default, and an
+# exception message the setup logged comes back from SSM as mojibake otherwise.
+#
+# A list rather than a map so setup_check_results_command prints the checks in
+# this order rather than alphabetically. The keys are configuration literals,
+# so the for_each built from them is known at plan time (rules.md B-8).
+#
+# Lives in this module rather than the root because every value it reads - the
+# instance, the paths, the ports, the account name - is this module's own
+# (rules.md C-1 is about combining modules, which this does not do).
+# ---------------------------------------------------------------------------
+locals {
+  setup_check_preamble = <<-EOT
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $Deadline = (Get-Date).AddSeconds(${var.setup_wait_seconds})
+    while (-not (Test-Path "${local.setup_status_path}") -and (Get-Date) -lt $Deadline) { Start-Sleep -Seconds 2 }
+    $Status = if (Test-Path "${local.setup_status_path}") { (Get-Content "${local.setup_status_path}" -Raw).Trim() } else { "not finished within ${var.setup_wait_seconds} seconds" }
+    EOT
+
+  setup_checks = [
+    {
+      key      = "setup_log"
+      commands = <<-EOT
+        Get-Content "${local.setup_log_path}" -Tail ${var.setup_log_tail_lines} -ErrorAction SilentlyContinue
+        Write-Output "Setup status: $Status"
+        if ($Status -ne "completed") { exit 1 }
+        EOT
+    },
+    {
+      key      = "rdp_status"
+      commands = <<-EOT
+        $Service = (Get-Service -Name TermService -ErrorAction SilentlyContinue).Status
+        $User = Get-LocalUser -Name "${var.workshop_username}" -ErrorAction SilentlyContinue
+        $Account = if (-not $User) { "missing" } elseif ($User.Enabled) { "enabled" } else { "disabled" }
+        $Listening = [bool](Get-NetTCPConnection -LocalPort ${var.rdp_port} -State Listen -ErrorAction SilentlyContinue)
+        Write-Output "Setup status: $Status"
+        Write-Output "TermService: $Service"
+        Write-Output "Account ${var.workshop_username}: $Account"
+        Write-Output "Port ${var.rdp_port} listening: $Listening"
+        if ("$Service" -ne "Running" -or $Account -ne "enabled" -or -not $Listening) { exit 1 }
+        EOT
+    },
+    {
+      key      = "app_status"
+      commands = <<-EOT
+        $Launchers = Test-Path "${var.workshop_dir}\temp\server.ps1"
+        $Clone = Test-Path "${var.workshop_dir}\${var.git_clone_branch}"
+        $Server = [bool](Get-NetTCPConnection -LocalPort ${var.game_server_port} -State Listen -ErrorAction SilentlyContinue)
+        $Client = [bool](Get-NetTCPConnection -LocalPort ${var.client_dev_port} -State Listen -ErrorAction SilentlyContinue)
+        Write-Output "Setup status: $Status"
+        Write-Output "Launcher scripts: $Launchers"
+        Write-Output "Clone ${var.git_clone_branch}: $Clone"
+        Write-Output "Game server on ${var.game_server_port}: $Server (False until someone runs 01 GameServer)"
+        Write-Output "Game client on ${var.client_dev_port}: $Client (False until someone runs 02 GameClient)"
+        if (-not ($Launchers -and $Clone)) { exit 1 }
+        EOT
+    },
+  ]
+}
+resource "aws_ssm_association" "setup_check" {
+  for_each = { for check in local.setup_checks : check.key => check.commands }
+
+  name = "AWS-RunPowerShellScript"
+  # Without a name all three show in the console as AWS-RunPowerShellScript and
+  # an id, with nothing to tell them apart.
+  association_name = "${var.association_name_prefix}-${replace(each.key, "_", "-")}"
+
+  targets {
+    key    = "InstanceIds"
+    values = [aws_instance.windows_ec2.id]
+  }
+  parameters = {
+    # Above the loop's own deadline, so the script reports "not finished"
+    # itself rather than being killed by the agent with no output.
+    executionTimeout = tostring(var.setup_wait_seconds + 120)
+    commands         = "${local.setup_check_preamble}${each.value}"
   }
 }
