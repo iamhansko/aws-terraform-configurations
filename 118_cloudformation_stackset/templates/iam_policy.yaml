@@ -1,0 +1,63 @@
+# The CloudFormation template the StackSet deploys into each target account and region.
+#
+# It stays CloudFormation, and deliberately: a StackSet distributes CloudFormation stacks, so translating
+# this to HCL would remove the thing the project demonstrates. What changed is that it is a file rather than
+# a one-line escaped string inside template_body, which is how the _monolithic template carried it - with
+# every newline written as \n, so a reader could not see the document at all and an edit meant re-escaping
+# it by hand.
+#
+# The sibling _monolithic/templates_iam_policy.tf is the machine translation of this same template into
+# Terraform. It is reference material for reading what the stack creates, not something applied.
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >-
+  Creates a managed policy that denies every action unless the call comes from one of a list of source
+  addresses. The policy is created but attached to nothing, so it has no effect until something is attached
+  to it - which is what makes it safe to deploy as a demo.
+
+Parameters:
+  AllowedSourceIpAddresses:
+    Type: CommaDelimitedList
+    Description: Source IP addresses exempt from the deny
+    Default: 100.0.0.11,100.0.0.12
+
+  ManagedPolicyName:
+    Type: String
+    Description: >-
+      Name of the managed policy. A parameter rather than a literal so the StackSet can be deployed twice
+      into one account without colliding - an IAM managed policy name is unique per account, and the
+      original hardcoded DenyAll.
+    Default: DenyAll
+    AllowedPattern: "[a-zA-Z0-9+=,.@_-]{1,128}"
+
+Resources:
+  DenyAllIamPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Ref ManagedPolicyName
+      Description: >-
+        Denies every action for calls not originating from AllowedSourceIpAddresses. Attach with care - this
+        locks out anything it applies to.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Deny
+            Action: "*"
+            Resource: "*"
+            Condition:
+              NotIpAddress:
+                aws:SourceIp: !Ref AllowedSourceIpAddresses
+              # Without this, a call an AWS service makes on your behalf - CloudFormation creating a
+              # resource, for instance - is denied too, because it arrives from the service's address
+              # rather than yours.
+              Bool:
+                aws:ViaAWSService: "false"
+
+Outputs:
+  DenyAllIamPolicyArn:
+    Description: ARN of the managed policy this stack created
+    Value: !Ref DenyAllIamPolicy
+
+  ManagedPolicyName:
+    Description: Name it was created under
+    Value: !Ref ManagedPolicyName
