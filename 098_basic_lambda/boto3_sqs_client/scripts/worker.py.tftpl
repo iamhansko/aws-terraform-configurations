@@ -1,0 +1,42 @@
+import boto3
+import concurrent.futures
+import logging
+
+# 설정 (Terraform 변수에서 렌더링됨)
+queue_url = "${queue_url}"
+log_file = "${log_file}"
+
+# level=logging.INFO이 반드시 있어야 합니다. 원본에는 없었고, 그러면 루트 로거의
+# 기본 레벨인 WARNING이 적용되어 아래 logging.info("처리성공") 호출이 전부 버려집니다.
+# 결과는 "워커는 메시지를 지우는데 로그 파일에는 아무것도 남지 않고, 그래서
+# 메트릭 필터가 영원히 매칭되지 않는" 상태입니다 - 오류는 어디에도 나지 않습니다.
+logging.basicConfig(filename=log_file, format="%(asctime)s %(message)s", level=logging.INFO)
+
+sqs = boto3.client("sqs", region_name="${region}")
+
+
+def worker(message):
+  try:
+    logging.info("처리성공")
+    sqs.delete_message(QueueUrl=queue_url, ReceiptHandle=message["ReceiptHandle"])
+  except Exception as e:
+    logging.error(e)
+
+
+def sqs_process(max_workers=10, wait_time=10, max_messages=10):
+  with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    while True:
+      response = sqs.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=max_messages,  # max 10
+        WaitTimeSeconds=wait_time,         # max 20
+        VisibilityTimeout=${visibility_timeout}
+      )
+      if "Messages" in response:
+        messages = response["Messages"]
+        futures = [executor.submit(worker, message) for message in messages]
+        concurrent.futures.wait(futures)
+
+
+if __name__ == "__main__":
+  sqs_process(max_workers=${max_workers}, wait_time=${wait_time}, max_messages=${max_messages})

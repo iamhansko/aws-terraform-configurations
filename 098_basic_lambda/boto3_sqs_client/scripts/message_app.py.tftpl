@@ -1,0 +1,100 @@
+import asyncio
+import aiohttp
+import time
+import boto3
+import requests
+from botocore.exceptions import ClientError
+
+# 설정 (Terraform 변수에서 렌더링됨)
+# 함수 이름은 Terraform이 채웁니다. 리터럴로 적어두면 lambda_function_name 변수를
+# 바꿨을 때 이 파일만 옛 이름을 들고 있게 되고, 증상은 get_function_url_config의
+# ResourceNotFoundException 하나입니다 (rules.md B-5).
+LAMBDA_FUNCTION_NAME = "${function_name}"  # Lambda 함수 이름
+TOTAL_REQUESTS = ${total_requests}
+# 이 함수가 쓸 수 있는 Lambda 동시성 상한을 넘지 않습니다. Function URL은 동기
+# 호출이라 in-flight 요청 하나가 동시 실행 하나를 점유하고, 초과분은 즉시 429가
+# 됩니다. 계정 한도 1000 중 890이 가드레일 함수에 예약되어 가용량은 110입니다.
+CONCURRENCY = ${concurrency}
+BATCH_SIZE = ${concurrency}
+BATCH_DELAY = ${batch_delay}
+MAX_RETRIES = ${max_retries}
+
+# 리전 자동 감지 (EC2 인스턴스 메타데이터 활용)
+def get_region_from_metadata():
+    try:
+        response = requests.get(
+            "http://169.254.169.254/latest/dynamic/instance-identity/document",
+            timeout=1
+        )
+        return response.json().get("region")
+    except Exception as e:
+        raise RuntimeError(f"리전 메타데이터 조회 실패: {e}")
+
+# 세션 및 클라이언트 생성
+AWS_REGION = get_region_from_metadata()
+session = boto3.session.Session(region_name=AWS_REGION)
+lambda_client = session.client("lambda")
+
+# Lambda Function URL 가져오기
+def get_lambda_function_url():
+    try:
+        response = lambda_client.get_function_url_config(FunctionName=LAMBDA_FUNCTION_NAME)
+        return response["FunctionUrl"]
+    except ClientError as e:
+        print(f"[Lambda URL 가져오기 실패] {e}")
+        return None
+
+# Lambda로 비동기 POST 요청 보내기
+async def send_post(session, i, target_url):
+    data = {"message": f"Hello from request {i}"}
+    headers = {"Content-Type": "application/json"}
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            async with session.post(target_url, json=data, headers=headers) as response:
+                if response.status == 200:
+                    return True
+                # 429는 실패가 아니라 백프레셔입니다. 동시성 슬롯이 비는 즉시
+                # 통과하므로, 버리지 않고 지수 백오프로 다시 보냅니다. 이것이
+                # 없으면 거절된 요청의 메시지는 큐에 영원히 들어가지 않습니다.
+                if response.status == 429 and attempt < MAX_RETRIES:
+                    await asyncio.sleep(0.05 * (2 ** attempt))
+                    continue
+                print(f"요청 {i} 실패: 상태 코드 {response.status}")
+                return False
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                await asyncio.sleep(0.05 * (2 ** attempt))
+                continue
+            print(f"요청 {i} 예외 발생: {e}")
+            return False
+    return False
+
+# 메인 비동기 루프
+async def main():
+    target_url = get_lambda_function_url()
+    if not target_url:
+        print("Lambda Function URL을 가져올 수 없습니다.")
+        return
+
+    connector = aiohttp.TCPConnector(limit=CONCURRENCY)
+    timeout = aiohttp.ClientTimeout(total=60)
+    success_count = 0
+
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        for batch_start in range(0, TOTAL_REQUESTS, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, TOTAL_REQUESTS)
+            tasks = [send_post(session, i, target_url) for i in range(batch_start, batch_end)]
+            results = await asyncio.gather(*tasks)
+            batch_success = results.count(True)
+            success_count += batch_success
+            print(f"{batch_start} ~ {batch_end} 요청 중 성공: {batch_success}")
+            await asyncio.sleep(BATCH_DELAY)  # 배치 간 짧은 대기
+
+    print(f"총 성공 요청 수: {success_count} / {TOTAL_REQUESTS}")
+
+# 실행
+if __name__ == "__main__":
+    start = time.time()
+    asyncio.run(main())
+    print(f"총 소요 시간: {time.time() - start:.2f}초")
