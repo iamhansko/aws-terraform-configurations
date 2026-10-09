@@ -18,6 +18,11 @@ override.tf.json
 *_override.tf.json
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 *tfplan*
+# Build
+build/
+# Python
+__pycache__/
+*.py[cod]
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
