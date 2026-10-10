@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Amazon Cognito SDK</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <style>
+      html, body { height: 100%; }
+      body { display: flex; align-items: center; padding-top: 40px; padding-bottom: 40px; background-color: #f5f5f5; }
+      .form-signup { max-width: 600px; padding: 15px; }
+      .form-signup .form-floating:focus-within { z-index: 2; }
+      .form-signup #floatingName, .form-signup #nav-sign-in #floatingUsername, .form-signup #nav-sign-in #floatingUsername1, .form-signup #floatingBucket { margin-bottom: -1px; border-bottom-right-radius: 0; border-bottom-left-radius: 0; }
+      .form-signup input[type="email"], .form-signup #nav-sign-up #floatingUsername { margin-bottom: -1px; border-radius: 0; }
+      .form-signup input[type="password"], .form-signup #nav-s3 #floatingPrefix { margin-bottom: 10px; border-top-left-radius: 0; border-top-right-radius: 0; }
+      .input-group, .alert { margin: 10px 0; }
+      .tab-pane { padding: 10px 0; min-height: 350px; }
+    </style>
+  </head>
+  <body class="text-center">
+    <main class="form-signup w-100 m-auto">
+      <nav>
+        <div class="nav nav-tabs" id="nav-tab" role="tablist">
+          <button class="nav-link active" id="nav-sign-up-tab" data-bs-toggle="tab" data-bs-target="#nav-sign-up" type="button" role="tab" aria-controls="nav-sign-up" aria-selected="true">Sign Up</button>
+          <button class="nav-link" id="nav-sign-in-tab" data-bs-toggle="tab" data-bs-target="#nav-sign-in" type="button" role="tab" aria-controls="nav-sign-in" aria-selected="false">Sign In</button>
+          <button class="nav-link" id="nav-mfa-tab" data-bs-toggle="tab" data-bs-target="#nav-mfa" type="button" role="tab" aria-controls="nav-mfa" aria-selected="false">Manage MFA</button>
+          <button class="nav-link" id="nav-call-apis-tab" data-bs-toggle="tab" data-bs-target="#nav-call-apis" type="button" role="tab" aria-controls="nav-call-apis" aria-selected="false">Call APIs</button>
+          <button class="nav-link" id="nav-s3-tab" data-bs-toggle="tab" data-bs-target="#nav-s3" type="button" role="tab" aria-controls="nav-s3" aria-selected="false">Access S3</button>
+        </div>
+      </nav>
+      <div class="tab-content" id="nav-tabContent">
+        <div class="tab-pane fade show active" id="nav-sign-up" role="tabpanel" aria-labelledby="nav-sign-up-tab" tabindex="0">
+          <form class="needs-validation" novalidate id="sign-up-form">
+            <div class="form-floating">
+              <input type="text" class="form-control" id="floatingName" placeholder="Name" required>
+              <label for="floatingName">Name</label>
+            </div>
+            <div class="form-floating">
+              <input type="text" class="form-control" id="floatingUsername" placeholder="Username" required>
+              <label for="floatingUsername">Username</label>
+            </div>
+            <div class="form-floating">
+              <input type="email" class="form-control" id="floatingEmail" placeholder="name@example.com" required>
+              <label for="floatingEmail">Email address</label>
+            </div>
+            <div class="form-floating">
+              <input type="password" class="form-control" id="floatingPassword" placeholder="Password" required>
+              <label for="floatingPassword">Password</label>
+            </div>
+            <button class="w-50 btn btn-lg btn-primary" type="submit">Sign Up</button>
+          </form>
+        </div>
+        <div class="tab-pane fade" id="nav-sign-in" role="tabpanel" aria-labelledby="nav-sign-in-tab" tabindex="0">
+          <form class="needs-validation" novalidate id="sign-in-form">
+            <div class="form-floating">
+              <input type="text" class="form-control" id="floatingUsername1" placeholder="Username" required>
+              <label for="floatingUsername1">Username</label>
+            </div>
+            <div class="form-floating">
+              <input type="password" class="form-control" id="floatingPassword1" placeholder="Password" required>
+              <label for="floatingPassword1">Password</label>
+            </div>
+            <button class="w-40 btn btn-lg btn-primary" type="submit">Sign In</button>
+            <button class="w-40 btn btn-lg btn-secondary" type="submit">Sign Out</button>
+          </form>
+        </div>
+        <div class="tab-pane fade" id="nav-mfa" role="tabpanel" aria-labelledby="nav-mfa-tab" tabindex="0">
+          <form class="needs-validation" novalidate id="mfa-form">
+            <button class="w-40 btn btn-lg btn-primary" type="submit">Enable MFA</button>
+            <button class="w-40 btn btn-lg btn-secondary" type="submit">Disable MFA</button>
+            <div class="form-floating">
+              <canvas id="qrcanvas"></canvas>
+              <div><button class="w-40 btn btn-sm btn-primary d-none" type="button" id="continue-mfa">Continue</button></div>
+            </div>
+          </form>
+        </div>
+        <div class="tab-pane fade" id="nav-call-apis" role="tabpanel" aria-labelledby="nav-call-apis-tab" tabindex="0">
+          <form class="needs-validation" novalidate id="call-apis-form">
+            <button class="w-50 btn btn-lg btn-primary" type="submit">Call API Gateway</button>
+          </form>
+        </div>
+        <div class="tab-pane fade" id="nav-s3" role="tabpanel" aria-labelledby="nav-s3-tab" tabindex="0">
+          <form class="needs-validation" novalidate id="s3-form">
+            <div class="form-floating">
+              <input type="text" class="form-control" id="floatingBucket" placeholder="Bucket" required>
+              <label for="floatingBucket">Bucket</label>
+            </div>
+            <div class="form-floating">
+              <input type="text" class="form-control" id="floatingPrefix" placeholder="Prefix" required>
+              <label for="floatingPrefix">Prefix</label>
+            </div>
+            <button class="w-40 btn btn-lg btn-primary" type="submit">List Files</button>
+          </form>
+        </div>
+      </div>
+      <div id="liveAlertPlaceholder"></div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+    <script src="./cognito-sdk.js" type="module"></script>
+  </body>
+</html>
