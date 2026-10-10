@@ -1,0 +1,25 @@
+variable "name" {
+  type        = string
+  default     = "ecs-cluster"
+  description = "Name of the cluster, as the _monolithic template had it. A fixed name, so a second copy of this project in one account collides - override it there"
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,254}$", var.name))
+    error_message = "name must be 1-255 characters of letters, digits, underscores and hyphens, starting with a letter or digit."
+  }
+}
+variable "container_insights" {
+  type        = string
+  default     = "enhanced"
+  description = <<-DESC
+    Value of the containerInsights cluster setting. "enhanced" is what the _monolithic template set and it
+    is kept: this project runs three services whose only observable behaviour is per-task, and enhanced is
+    the mode that reports per-task and per-container metrics rather than cluster and service totals.
+
+    It bills per observed resource, which for three tasks on three container instances is small but is not
+    nothing - "disabled" turns it off without changing anything else here.
+  DESC
+  validation {
+    condition     = contains(["enhanced", "enabled", "disabled"], var.container_insights)
+    error_message = "container_insights must be enhanced, enabled or disabled. ECS rejects any other value at apply with InvalidParameterException; plan does not check it."
+  }
+}
