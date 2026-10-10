@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  cognito-lambdas
+  SAM Template for cognito-lambdas
+
+Globals:
+  Function:
+    Handler: app.lambdaHandler
+    Runtime: nodejs22.x
+    MemorySize: 1024
+    Timeout: 30
+    Tracing: Active
+    Architectures:
+      - x86_64
+
+Parameters:
+  UserPoolArn:
+    Type: String
+    Default: ""
+  UserPoolId:
+    Type: String
+    Default: ""
+  ClientId:
+    Type: String
+    Default: ""
+
+Resources:
+  PreToken:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-PreToken
+      CodeUri: PreToken/
+  PreTokenPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PreToken.Arn
+      Principal: cognito-idp.amazonaws.com
+      Action: lambda:InvokeFunction
+      SourceArn: !Ref UserPoolArn
+
+Outputs:
+  PreTokenLambdaArn:
+    Value: !GetAtt PreToken.Arn

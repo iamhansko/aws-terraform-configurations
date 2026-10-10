@@ -1,0 +1,16 @@
+{
+  "name": "cognito-ws-fe",
+  "version": "1.0.0",
+  "description": "Amazon Cognito Workshop Front-End",
+  "main": "app.js",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.787.0",
+    "@aws-sdk/credential-providers": "3.787.0",
+    "amazon-cognito-identity-js": "^6.3.15",
+    "axios": "^1.8.4",
+    "base64-arraybuffer": "^1.0.2",
+    "qrcode": "^1.5.4"
+  }
+}

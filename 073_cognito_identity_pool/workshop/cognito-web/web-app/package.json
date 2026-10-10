@@ -1,0 +1,13 @@
+{
+  "name": "cognito-ws-be",
+  "version": "1.0.0",
+  "description": "Amazon Cognito Workshop Backend",
+  "main": "app.js",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.1.0",
+    "base64-arraybuffer": "^1.0.2",
+    "fido2-lib": "^3.5.3"
+  }
+}
