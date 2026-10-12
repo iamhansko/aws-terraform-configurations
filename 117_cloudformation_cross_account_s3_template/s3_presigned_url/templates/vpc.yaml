@@ -1,0 +1,17 @@
+# The template the presigned URL points at.
+#
+# The _monolithic template wrote this from the instance's userdata with echo and then uploaded it with
+# aws s3 cp - so the object existed only once cloud-init got that far, while the Lambda that presigned it ran
+# as soon as the instance was merely running. A presigned URL is signed without checking the object exists,
+# so the URL was produced either way and pointed at nothing until the upload landed. aws_s3_object uploads it
+# here, and the presign waits for it.
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: new-vpc

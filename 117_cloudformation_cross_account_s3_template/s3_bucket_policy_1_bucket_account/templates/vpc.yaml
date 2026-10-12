@@ -1,0 +1,15 @@
+# The template the stack account deploys from this account's bucket.
+#
+# A file rather than the escaped one-line TemplateBody string the _monolithic template passed to a Lambda
+# function, which wrote it into the bucket with put_object. aws_s3_object uploads it directly, so the
+# function, its role and the archive_file are gone.
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: new-vpc
