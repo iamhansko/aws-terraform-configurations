@@ -1,0 +1,10 @@
+# Installed by MWAA with pip on every component at startup.
+#
+# Adapted from awslabs/data-on-eks@1b7906b8, schedulers/terraform/managed-airflow-mwaa/dags/requirements.txt.
+# The original pinned kubernetes==11.0.0 and apache-airflow-providers-cncf-kubernetes==2.0.2, both of
+# which conflict with the constraints of any Airflow version MWAA still creates. No constraints
+# statement and no versions here on purpose: from Airflow 2.7.2 on, MWAA supplies the constraints file
+# of the environment's own Airflow version when this file names none, so the provider resolves to the
+# release that version was tested with (10.13.0 for 2.11.2) and the kubernetes client comes with it.
+# That detection is MWAA's, so this comment avoids spelling the option out.
+apache-airflow-providers-cncf-kubernetes

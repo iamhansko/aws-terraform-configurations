@@ -1,0 +1,51 @@
+"""
+Runs one pod on the EKS cluster from MWAA with the KubernetesPodOperator.
+
+Adapted from awslabs/data-on-eks@1b7906b8,
+schedulers/terraform/managed-airflow-mwaa/dags/mwaa_pod_example.py (Apache License 2.0).
+
+This file is a Terraform template: main.tf renders it with templatefile() and uploads the result to
+the MWAA source bucket, so the namespace, the kubeconfig file and its context below are the same
+values Terraform used to create them. Edit main.tf's values, not the rendered copy in S3.
+
+What changed from the original, and why:
+  - The operator is imported from operators.pod. operators.kubernetes_pod was removed from
+    apache-airflow-providers-cncf-kubernetes in 10.0, and the Airflow 2.11.2 constraints pin 10.13.0.
+  - on_finish_action="keep_pod" replaces is_delete_operator_pod=False. 10.13.0 still accepts that
+    argument but ignores it, so the original's pod would have been deleted on completion - the
+    opposite of what it asked for. The pod stays, so kubectl can show it afterwards.
+  - schedule replaces schedule_interval, and provide_context is gone from default_args - Airflow 2
+    passes the context to every task and ignores the key.
+"""
+from datetime import datetime
+
+from airflow import DAG
+from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperator
+
+default_args = {
+    "owner": "aws",
+    "depends_on_past": False,
+    "start_date": datetime(2019, 2, 20),
+}
+
+dag = DAG("kubernetes_pod_example", default_args=default_args, schedule=None)
+
+# The kubeconfig Terraform writes into the same DAG folder. MWAA syncs the folder to this path on
+# every worker.
+kube_config_path = "/usr/local/airflow/dags/${kube_config_file}"
+
+podRun = KubernetesPodOperator(
+    namespace="${namespace}",
+    image="ubuntu:18.04",
+    cmds=["bash"],
+    arguments=["-c", "ls"],
+    labels={"foo": "bar"},
+    name="mwaa-pod-test",
+    task_id="pod-task",
+    get_logs=True,
+    dag=dag,
+    on_finish_action="keep_pod",
+    config_file=kube_config_path,
+    in_cluster=False,
+    cluster_context="${kube_context}",  # Must match kubeconfig context
+)

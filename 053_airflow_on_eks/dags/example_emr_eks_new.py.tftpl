@@ -1,0 +1,81 @@
+"""
+This is an example dag for an Amazon EMR on EKS Spark job.
+
+Adapted from awslabs/data-on-eks@1b7906b8,
+schedulers/terraform/managed-airflow-mwaa/dags/example_emr_eks_new.py (Apache License 2.0).
+
+This file is a Terraform template: main.tf renders it with templatefile() and uploads the result to
+the MWAA source bucket, so the connection ID, the release label and the log group below come from
+the Terraform configuration rather than being typed here. Edit main.tf's values, not the rendered
+copy in S3.
+
+What changed from the original, and why:
+  - The connection is read through Jinja in the operator's templated fields - the alternative the
+    original left commented out - instead of BaseHook.get_connection() at the top of the file. Top-
+    level code runs on every parse of the file, and with the environment's Secrets Manager backend a
+    connection lookup there is a GetSecretValue call each time; in a templated field it runs once,
+    when the task does. A failed top-level lookup also stops the whole file from importing, where a
+    failed templated one fails only the task, with the reason in its log.
+  - The connection itself is a Secrets Manager secret Terraform writes, where the original asked
+    for it to be typed into the Airflow UI.
+  - start_date is a fixed datetime and schedule replaces schedule_interval. days_ago() and
+    schedule_interval are deprecated throughout Airflow 2 and gone in 3.
+  - release_label is a current EMR release instead of emr-6.3.0-latest. 6.3.0's Java 8 predates
+    cgroup v2 support, and the EKS AL2023 nodes this cluster runs are cgroup v2.
+  - spark.executor.* instead of spark.executors.*, which are not Spark settings and were silently
+    ignored - so the original never got the executors it asked for.
+  - The monitoring log group is the one Terraform creates for the job execution role. The original
+    named /aws/emr-eks-spark, which nothing created and the role was not allowed to write to.
+"""
+from datetime import datetime, timedelta
+
+from airflow import DAG
+from airflow.providers.amazon.aws.operators.emr import EmrContainerOperator
+
+# [START howto_operator_emr_eks_config]
+JOB_DRIVER_ARG = {
+    "sparkSubmitJobDriver": {
+        "entryPoint": "local:///usr/lib/spark/examples/src/main/python/pi.py",
+        "sparkSubmitParameters": "--conf spark.executor.instances=2 --conf spark.executor.memory=2G --conf spark.executor.cores=2 --conf spark.driver.cores=1",  # noqa: E501
+    }
+}
+
+CONFIGURATION_OVERRIDES_ARG = {
+    "applicationConfiguration": [
+        {
+            "classification": "spark-defaults",
+            "properties": {
+                "spark.hadoop.hive.metastore.client.factory.class": "com.amazonaws.glue.catalog.metastore.AWSGlueDataCatalogHiveClientFactory",  # noqa: E501
+            },
+        }
+    ],
+    "monitoringConfiguration": {
+        "cloudWatchMonitoringConfiguration": {
+            "logGroupName": "${log_group_name}",
+            "logStreamNamePrefix": "airflow",
+        }
+    },
+}
+# [END howto_operator_emr_eks_config]
+
+with DAG(
+    dag_id="emr_eks_pi_job",
+    dagrun_timeout=timedelta(hours=2),
+    start_date=datetime(2023, 1, 1),
+    schedule="@once",
+    tags=["emr_containers", "example"],
+) as dag:
+    # [START howto_operator_emr_eks_jobrun]
+    job_starter = EmrContainerOperator(
+        task_id="start_job",
+        # Resolved when the task runs, from the connection Terraform stores in Secrets Manager. Its
+        # extra carries the virtual cluster ID and the job role ARN, taken from the resources
+        # themselves.
+        virtual_cluster_id='{{ conn.${connection_id}.extra_dejson["virtual_cluster_id"] }}',
+        execution_role_arn='{{ conn.${connection_id}.extra_dejson["job_role_arn"] }}',
+        release_label="${release_label}",
+        job_driver=JOB_DRIVER_ARG,
+        configuration_overrides=CONFIGURATION_OVERRIDES_ARG,
+        name="pi.py",
+    )
+    # [END howto_operator_emr_eks_jobrun]
