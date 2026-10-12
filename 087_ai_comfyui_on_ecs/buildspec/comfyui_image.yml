@@ -1,0 +1,40 @@
+# Builds the ComfyUI image and pushes it to this project's ECR repository.
+#
+# This is what the blueprint's DockerImageAsset did inside cdk deploy: build comfyui_aws_stack/docker and
+# publish it to the CDK bootstrap stack's repository. The build context is comfyui_image/ in this project,
+# uploaded to S3 by Terraform, and the repository is this project's own.
+#
+# The tag is the build context's content hash, computed by Terraform (main.tf) the way CDK hashed an asset. So
+# the repository is IMMUTABLE, and a tag that is already in it is not built again - which is what cdk-assets
+# did with an asset it had already published. A rerun of the same context costs a describe-images call
+# rather than a twenty-minute build.
+#
+# Passed to the project as its buildspec rather than shipped inside the build context, so it is not part of
+# the image hash: changing how the image is pushed does not change what is in it.
+#
+# IMAGE_REPO_NAME, IMAGE_TAG and IMAGE_URI come from the project's environment (modules/comfyui_image), so the
+# names are defined in one place. Nothing here is interpolated by Terraform.
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      # The registry host is the image URI up to its first slash.
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${IMAGE_URI%%/*}"
+  build:
+    commands:
+      - |
+        set -eu
+        image_present() {
+          aws ecr describe-images --repository-name "$IMAGE_REPO_NAME" --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1
+        }
+        if image_present; then
+          echo "$IMAGE_URI is already in the repository - not rebuilding it"
+        else
+          docker build --platform linux/amd64 -t "$IMAGE_URI" .
+          # A push the repository refuses because the tag arrived while this build ran is not a failure: the
+          # tag is the build context's hash, so another build of the same context pushed it. That is what an
+          # interrupted apply leaves behind - its build keeps running in CodeBuild, and the next apply starts a
+          # second one that finds the tag taken only when it pushes.
+          docker push "$IMAGE_URI" || image_present
+        fi
