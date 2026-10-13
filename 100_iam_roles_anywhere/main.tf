@@ -476,10 +476,9 @@ locals {
   $WorkDir = (Get-Location).Path
   $Cert    = Join-Path $WorkDir $CertObject
   $Key     = Join-Path $WorkDir $KeyObject
-  # Filename carries the pinned version, so this never collides with an aws_signing_helper.exe that
-  # happens to be sitting in the working directory already - the project directory ships one. The
-  # version is cut out of the URL rather than written again, so the name and the thing downloaded
-  # cannot disagree.
+  # Filename carries the pinned version, so it cannot collide with an unversioned helper copied
+  # into the working directory. The version is cut out of the URL rather than written again, so
+  # the name and the thing downloaded cannot disagree.
   $Helper  = Join-Path $WorkDir 'aws_signing_helper-${split("/", local.windows_signing_helper.url)[4]}.exe'
 
   # --- 1. certificate material, downloaded with this shell's own AWS credentials --------------
@@ -515,10 +514,10 @@ locals {
   # Pinned version and verified checksum, because this downloads a binary and then executes it.
   #
   # The checksum decides whether to download, not whether the file is there. Those are different
-  # questions, and treating presence as proof is how an earlier version of this script failed: the
-  # project directory ships a helper of its own, Test-Path accepted it, and the run died on a hash
-  # that was simply an older release. A file that does not match the pinned hash is replaced; only
-  # a fresh download that still mismatches is worth stopping for.
+  # questions, and treating presence as proof is how an earlier version of this script failed: an
+  # older workspace copy passed Test-Path, and the run died on a hash that was simply an older
+  # release. A file that does not match the pinned hash is replaced; only a fresh download that
+  # still mismatches is worth stopping for.
   $sum = if (Test-Path $Helper) { (Get-FileHash -Algorithm SHA256 -Path $Helper).Hash.ToLower() } else { '' }
   if ($sum -ne $HelperSha256) {
     Invoke-WebRequest -Uri $HelperUrl -OutFile $Helper

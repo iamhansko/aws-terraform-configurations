@@ -1,31 +1,38 @@
-.venv/*
-.terraform.lock.hcl
-# Local .terraform directories
+# AWS
+.aws
+
+# Terraform
 **/.terraform/*
-# .tfstate files
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
-# Crash log files
-crash.log
-crash.*.log
-# Exclude all .tfvars files, which are likely to contain sensitive data
 *.tfvars
 *.tfvars.json
-# Ignore override files as they are usually used to override resources locally
+*tfplan*
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
-# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-*tfplan*
-# Build
-build/
-# Python
-__pycache__/
-*.py[cod]
-# Ignore CLI configuration files
 .terraformrc
 terraform.rc
+crash.log
+crash.*.log
+
+# Build
+build/
+
+# Python
+.venv/*
+__pycache__/
+*.py[cod]
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
 # macOS
 .DS_Store
 .AppleDouble
@@ -33,11 +40,10 @@ terraform.rc
 ._*
 .Spotlight-V100
 .Trashes
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-*.lnk
-# AWS
-.aws
+
+# Project-specific
+/025_cross_vpc_ecs_bluegreen/src/green_[0-9]*
+/025_cross_vpc_ecs_bluegreen/src/red_[0-9]*
+/100_iam_roles_anywhere/aws_signing_helper
+/100_iam_roles_anywhere/aws_signing_helper.exe
+/100_iam_roles_anywhere/aws_signing_helper-[0-9]*
