@@ -6,7 +6,7 @@
 # description ("Variables not allowed"), so the wording is a literal on both sides.
 output "vscode_url" {
   value       = local.outputs.vscode_url.value
-  description = "The IDE, through CloudFront. The instance accepts port 8000 only from CloudFront's prefix list, so this is the only way in"
+  description = "Preferred HTTPS IDE URL through CloudFront. The instance port also admits the detected My IP /32 directly by default, or 0.0.0.0/0 by explicit opt-in"
 }
 output "security_note" {
   value       = local.outputs.security_note.value

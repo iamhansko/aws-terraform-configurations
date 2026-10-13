@@ -225,8 +225,8 @@ variable "vscode_instance_type" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) on the VS Code EC2 instance from 0.0.0.0/0. Leave false and use SSM Session Manager port forwarding for anything but a short-lived demo"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "build_sample_image" {
   type        = bool
@@ -280,8 +280,8 @@ variable "nlb_security_group_name" {
 }
 variable "nlb_allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the internet-facing NLB accepts HTTP from 0.0.0.0/0. True by default because an internet-facing scheme that nobody can reach is not much of a demo"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "nlb_service_cidr_blocks" {
   type        = list(string)
@@ -291,5 +291,16 @@ variable "nlb_service_cidr_blocks" {
   validation {
     condition     = alltrue([for cidr in var.nlb_service_cidr_blocks : can(cidrhost(cidr, 0))])
     error_message = "nlb_service_cidr_blocks must contain valid IPv4 CIDR blocks."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

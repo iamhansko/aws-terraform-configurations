@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 locals {
   key_name = var.key_name == null ? "${var.cluster_name_prefix}-key" : var.key_name
@@ -545,6 +567,7 @@ module "vscode_ec2" {
   root_volume_size            = var.root_volume_size
   security_group_name         = "${var.cluster_name_prefix}-vscode-sg"
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   marker_file_path            = var.marker_file_path
   # AdministratorAccess, as the _monolithic template attached. It is worth re-reading now that this instance
   # no longer builds anything: it is a place to run kubectl and read a Karmada kubeconfig out of Parameter

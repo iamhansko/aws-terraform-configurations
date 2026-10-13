@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 module "network" {
   source = "./modules/network"
@@ -121,6 +143,7 @@ module "nlb_security_group" {
   name                        = var.nlb_security_group_name
   description                 = "Frontend security group for the internet-facing NLB the controller provisions from the kube-ops-view Service"
   allow_inbound_from_anywhere = var.nlb_allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   ingress_cidr_blocks         = var.nlb_ingress_cidr_blocks
 
   depends_on = [module.network]
@@ -188,6 +211,7 @@ module "vscode_ec2" {
   key_name                    = module.key_pair.key_name
   instance_type               = var.vscode_instance_type
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   # Lets the README association below know when the bootstrap has finished
   # (rules.md H-2). The module touches <path>/userdata as its very last step,
   # after everything in additional_user_data has run.

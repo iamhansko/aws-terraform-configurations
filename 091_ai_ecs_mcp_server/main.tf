@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 # A code-server workbench reached through CloudFront, with the Amazon Q CLI configured to start the AWS
 # documentation MCP server and the ECS MCP server - and an ECS cluster for the latter to operate on: an EC2 Auto
 # Scaling group behind a managed-scaling capacity provider in two private subnets, with the Fargate providers
@@ -80,7 +102,9 @@ module "key_pair" {
   depends_on = [module.network]
 }
 module "vscode_ec2" {
-  source = "./modules/vscode_ec2"
+  source                      = "./modules/vscode_ec2"
+  allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
 
   name                   = "${var.project_name}-vscode"
   vpc_id                 = module.network.vpc_id
@@ -90,8 +114,8 @@ module "vscode_ec2" {
   ami_ssm_parameter_name = var.vscode_ami_ssm_parameter_name
   code_server_version    = var.code_server_version
   security_group_name    = "${var.project_name}-vscode-sg"
-  # The one ingress rule: code-server's port from CloudFront's edge locations, as the _monolithic template had
-  # it. Nothing opens the port to 0.0.0.0/0, so the distribution below is the only way into the IDE.
+  # CloudFront's origin-facing ranges remain an additional source. The default false switch also admits the
+  # detected My IP /32 directly; true replaces that selected source with 0.0.0.0/0.
   ingress_prefix_lists = {
     cloudfront = data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id
   }
@@ -255,7 +279,7 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server, through CloudFront"
-      description = "Open the IDE here. The instance accepts its code-server port only from CloudFront's origin-facing prefix list, so this URL is the only way in"
+      description = "Preferred HTTPS URL for the IDE through CloudFront. The instance port also admits the detected My IP /32 directly by default; allow_inbound_from_anywhere = true replaces that selected source with 0.0.0.0/0"
       value       = module.cloudfront.url
     }
     security_note = {

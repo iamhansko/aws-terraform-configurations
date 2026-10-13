@@ -263,8 +263,8 @@ variable "vscode_instance_type" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) on the VS Code instance from 0.0.0.0/0, as the _monolithic template's InboundFromAnywhere parameter did. Set false and reach it through SSM Session Manager port forwarding instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "eks_node_viewer_version" {
   type        = string
@@ -304,5 +304,16 @@ variable "kubectl_download_version" {
   validation {
     condition     = can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]{4}-[0-9]{2}-[0-9]{2}$", var.kubectl_download_version))
     error_message = "kubectl_download_version must look like 1.33.3/2025-08-03."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

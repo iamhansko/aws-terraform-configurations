@@ -106,8 +106,8 @@ variable "container_instance_ami_ssm_parameter_name" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the workbench's code-server port is open to 0.0.0.0/0, as the template had it. code-server runs with auth: none, so this exposes an unauthenticated shell on an instance holding AdministratorAccess - it is the demo's only way in and it is reproduced, but see modules/vscode_ec2 before leaving it running"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "marker_file_path" {
   type        = string
@@ -273,5 +273,16 @@ variable "marker_wait_attempts" {
   validation {
     condition     = var.marker_wait_attempts * 10 < var.schema_timeout_seconds && var.marker_wait_attempts * 10 < var.readme_timeout_seconds
     error_message = "marker_wait_attempts times ten seconds must be less than both schema_timeout_seconds and readme_timeout_seconds, so a step still waiting reports which marker file it is waiting for rather than being killed first."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

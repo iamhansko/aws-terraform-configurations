@@ -12,7 +12,7 @@ output "private_ip" {
 }
 output "vscode_url" {
   value       = "http://${aws_eip.vscode_ec2_elastic_ip.public_ip}:${var.code_server_port}"
-  description = "URL of the code-server web UI. code-server runs with authentication disabled, so while allow_inbound_from_anywhere is true this URL is the credential"
+  description = "URL of the code-server web UI. code-server runs with authentication disabled, so this URL is a credential even when access is restricted to the detected My IP"
 }
 output "code_server_port" {
   value       = var.code_server_port

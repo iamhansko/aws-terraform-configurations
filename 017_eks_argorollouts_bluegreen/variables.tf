@@ -201,12 +201,12 @@ variable "vscode_instance_type" {
 variable "enable_cloudfront" {
   type        = bool
   default     = true
-  description = "Whether to front the VS Code instance with a CloudFront distribution, so the editor is reached over HTTPS and the instance's own port stays closed to the internet. When false, reach code-server directly (see allow_inbound_from_anywhere) or through SSM Session Manager port forwarding"
+  description = "Whether to front the VS Code instance with a CloudFront distribution for HTTPS access. CloudFront ranges are additive to the source selected by allow_inbound_from_anywhere, and SSM port forwarding remains available without any inbound rule"
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) on the instance from 0.0.0.0/0. Unnecessary when enable_cloudfront is true, because the instance's security group then admits only the CloudFront origin-facing prefix list"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "cloudfront_origin_facing_prefix_list_name" {
   type        = string
@@ -387,5 +387,16 @@ variable "bluegreen_replica_count" {
   validation {
     condition     = var.bluegreen_replica_count > 0
     error_message = "bluegreen_replica_count must be greater than zero."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

@@ -6,11 +6,11 @@
 # not.
 output "vscode_port_forward_command" {
   value       = local.outputs.vscode_port_forward_command.value
-  description = "Run on your own machine with the AWS CLI and the Session Manager plugin installed, and keep it running - vscode_url answers only while it does"
+  description = "Optional SSM port-forward command. The public vscode_url is reachable from the detected My IP by default, so this tunnel is an alternative rather than a prerequisite"
 }
 output "vscode_url" {
   value       = local.outputs.vscode_url.value
-  description = "The IDE: localhost through the port forward, or the instance's public address when allow_inbound_from_anywhere is true. No authentication, AdministratorAccess behind it"
+  description = "Public IDE URL, reachable from the detected My IP by default or every IPv4 source when allow_inbound_from_anywhere is true. No authentication, AdministratorAccess behind it"
 }
 output "comfyui_url" {
   value       = local.outputs.comfyui_url.value

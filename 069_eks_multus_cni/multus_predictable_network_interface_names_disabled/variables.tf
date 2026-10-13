@@ -242,8 +242,8 @@ variable "workload_namespace" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the VS Code security group accepts traffic from 0.0.0.0/0 on the code-server port, as the _monolithic template had it. code-server has no authentication in front of it, so narrow this where possible and reach it through SSM Session Manager port forwarding instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_instance_type" {
   type        = string
@@ -303,5 +303,16 @@ variable "whereabouts_reconciler_cron_expression" {
   validation {
     condition     = length(split(" ", trimspace(var.whereabouts_reconciler_cron_expression))) == 5
     error_message = "whereabouts_reconciler_cron_expression must be a five-field cron expression (minute hour day-of-month month day-of-week)."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

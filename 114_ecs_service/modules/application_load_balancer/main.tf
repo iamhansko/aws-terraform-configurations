@@ -15,13 +15,13 @@ resource "aws_security_group" "load_balancer" {
 # Standalone rules rather than inline blocks (rules.md F-2). The listener port from anywhere is conditional,
 # as the _monolithic template's InboundFromAnywhere parameter made it.
 resource "aws_vpc_security_group_ingress_rule" "listener_from_anywhere" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.load_balancer.id
-  description       = "Listener port from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "Listener port from anywhere" : "Listener port from My IP"
   ip_protocol       = "tcp"
   from_port         = var.listener_port
   to_port           = var.listener_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 # The rule the _monolithic template was missing entirely. Its group had ingress only, and Terraform removes
 # the allow-all egress AWS puts on a new group, so the ALB could not open a connection to a single target:

@@ -206,25 +206,8 @@ variable "vscode_instance_type" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = <<-DESC
-    Whether the workbench security group accepts traffic from 0.0.0.0/0 on the code-server port, which is
-    8000. True, so the vscode_url output is reachable from a browser without any further setup.
-
-    This departs from the _monolithic template, whose InboundFromAnywhere parameter defaulted to "False" - a
-    bool here where that template used a string validated against ["True", "False"].
-
-    Worth being clear about what it exposes, because nothing else in this configuration limits it: code-server
-    is configured with auth: none, and the instance's role is AdministratorAccess (rules.md A-5 exempts the
-    workbench from the least-privilege rule, which is what makes this combination possible). So anyone who
-    reaches port 8000 gets an unauthenticated terminal with administrative credentials in this account, and
-    with the cluster security group attached, kubectl against the private API server.
-
-    Two narrower options, if that trade is not wanted:
-      - set this false and reach code-server through SSM Session Manager port forwarding;
-      - set this false and put an office or home prefix in vscode_ingress_cidr_blocks, which opens the same
-        port to those CIDRs only.
-  DESC
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_ingress_cidr_blocks" {
   type        = list(string)
@@ -591,5 +574,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > 0
     error_message = "readme_timeout_seconds must be positive."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

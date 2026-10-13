@@ -260,8 +260,8 @@ variable "load_balancer_security_group_name" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the NLB frontend security group and the VS Code security group accept traffic from 0.0.0.0/0. True as the _monolithic template had it, because the application and code-server are both reached from a browser - but code-server has no authentication in front of it, so narrow this with ingress_cidr_blocks where possible"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_instance_type" {
   type        = string
@@ -308,5 +308,16 @@ variable "readme_timeout_seconds" {
     # (rules.md B-1/D-5).
     condition     = var.readme_timeout_seconds > var.source_upload_timeout_seconds
     error_message = "readme_timeout_seconds must be greater than source_upload_timeout_seconds: the README association waits for the upload to finish, so a smaller budget makes it give up on a step that is still running, and SSM reports that only as \"unexpected state 'Failed'\"."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

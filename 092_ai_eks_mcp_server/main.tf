@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 # The addresses CloudFront's edge locations make origin requests from.
 #
@@ -116,8 +138,8 @@ module "eks_coredns_addon" {
   depends_on = [
   module.network, module.eks_node_group]
 }
-# The workbench. Reached through CloudFront rather than directly, which is this project's one structural
-# improvement over most of the others here - its only ingress rule is the CloudFront prefix list.
+# The workbench. CloudFront is its preferred HTTPS path; the security group also admits the detected My IP
+# /32 directly by default, or 0.0.0.0/0 only when explicitly requested.
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"
 
@@ -128,8 +150,10 @@ module "vscode_ec2" {
   instance_type       = var.vscode_instance_type
   code_server_version = var.code_server_version
   security_group_name = "${var.cluster_name}-vscode-sg"
-  # False by default, so 8000 is not open to the world. The prefix list rule below is the only way in.
+  # False by default, so the selected direct source is My IP /32. The CloudFront prefix list below is
+  # additive; true replaces only the selected direct source with 0.0.0.0/0.
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   ingress_prefix_list_ids     = [data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id]
   marker_file_path            = var.marker_file_path
   # The cluster security group, so kubectl on this instance reaches the API server without leaving the VPC.
@@ -284,7 +308,7 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server, through CloudFront"
-      description = "Open the IDE here. The instance itself is not reachable from the internet - its security group accepts port 8000 only from CloudFront's origin-facing prefix list - so this URL is the only way in. It answers once the distribution reads Deployed, which is several minutes after apply returns"
+      description = "Preferred HTTPS IDE URL through CloudFront. The instance port also admits the detected My IP /32 directly by default, or 0.0.0.0/0 by explicit opt-in. This URL answers once the distribution reads Deployed, several minutes after apply returns"
       value       = module.cloudfront.url
     }
     security_note = {

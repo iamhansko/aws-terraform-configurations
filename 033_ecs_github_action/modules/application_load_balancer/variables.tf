@@ -137,8 +137,26 @@ variable "security_group_description" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the listener port accepts traffic from 0.0.0.0/0. True as the _monolithic template had it - the point of the demo is opening the deployed application in a browser"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only my_ip_cidr"
+}
+
+variable "my_ip_cidr" {
+  type        = string
+  default     = null
+  description = "Public IPv4 /32 supplied by the root and used as the controlled ingress source when allow_inbound_from_anywhere is false"
+
+  validation {
+    condition = (
+      var.my_ip_cidr == null ||
+      (can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}/32$", var.my_ip_cidr)) && can(cidrhost(var.my_ip_cidr, 0)))
+    )
+    error_message = "my_ip_cidr must be a valid IPv4 host CIDR such as 203.0.113.10/32, or null when allow_inbound_from_anywhere is true."
+  }
+  validation {
+    condition     = var.allow_inbound_from_anywhere || var.my_ip_cidr != null
+    error_message = "my_ip_cidr must be supplied when allow_inbound_from_anywhere is false. Pass the public IPv4 /32 detected by the root data.http.my_ip lookup."
+  }
 }
 variable "revoke_rules_on_delete" {
   type        = bool

@@ -611,24 +611,17 @@ variable "grafana_alb_security_group_name" {
 }
 variable "grafana_allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the Grafana ALB accepts its listener port from 0.0.0.0/0, as the ALB 052's post-install step created did (the controller's own frontend group opened the listener to everyone). Grafana asks for a password, but the ALB serves it over plain HTTP. Set false and list your own networks in grafana_ingress_cidr_blocks instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "grafana_ingress_cidr_blocks" {
   type        = list(string)
   default     = []
-  description = "CIDR blocks allowed to reach the Grafana ALB, in addition to (or, with grafana_allow_inbound_from_anywhere false, instead of) 0.0.0.0/0. The workbench's security group is always allowed, which is what reaches an internal ALB"
+  description = "Additional CIDR blocks allowed to reach the Grafana ALB, alongside the source selected by grafana_allow_inbound_from_anywhere"
 
   validation {
     condition     = alltrue([for cidr in var.grafana_ingress_cidr_blocks : can(cidrhost(cidr, 0))])
     error_message = "grafana_ingress_cidr_blocks must contain valid IPv4 CIDR blocks."
-  }
-  validation {
-    # An internet-facing ALB is reached through its public addresses, where the workbench's
-    # security-group rule never matches. With neither of the other two sources it accepts nothing, and
-    # every Terraform resource still reports success.
-    condition     = var.grafana_alb_scheme == "internal" || var.grafana_allow_inbound_from_anywhere || length(var.grafana_ingress_cidr_blocks) > 0
-    error_message = "An internet-facing Grafana ALB needs grafana_allow_inbound_from_anywhere = true or at least one grafana_ingress_cidr_blocks entry; with neither, nobody can reach it. To keep it closed to the internet, set grafana_alb_scheme = \"internal\" and reach it from the workbench."
   }
 }
 
@@ -695,8 +688,8 @@ variable "code_server_version" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) from 0.0.0.0/0, as the _monolithic template's InboundFromAnywhere parameter did. code-server here runs with auth: none and the instance role behind it is AdministratorAccess, so this is an unauthenticated editor with administrator credentials on the public internet - set false and reach it through SSM Session Manager port forwarding instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "kubectl_download_version" {
   type        = string
@@ -743,5 +736,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds >= 300
     error_message = "readme_timeout_seconds must be at least 300."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

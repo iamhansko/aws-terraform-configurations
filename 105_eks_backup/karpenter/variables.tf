@@ -550,8 +550,8 @@ variable "vscode_instance_type" {
 
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the workbench security group accepts code-server traffic from 0.0.0.0/0. True reproduces the _monolithic template's InboundFromAnywhere default; code-server runs with auth disabled, so restrict this for anything beyond a demo"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 
 variable "kubectl_download_version" {
@@ -595,5 +595,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds >= 300
     error_message = "readme_timeout_seconds must be at least 300."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

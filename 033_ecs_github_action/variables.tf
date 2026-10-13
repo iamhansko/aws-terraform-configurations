@@ -122,8 +122,8 @@ variable "bastion_ssh_port" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether code-server, the workbench's ssh port and the ALB listener accept traffic from 0.0.0.0/0. True as the _monolithic template had it. code-server runs with auth: none, so this is an unauthenticated editor on a public address - which is also why no secret is written into the README it serves (rules.md H-2)"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 # --- Container instances ----------------------------------------------------------------------------------
 variable "ecs_ami_ssm_parameter_name" {
@@ -614,5 +614,16 @@ variable "marker_wait_interval_seconds" {
   validation {
     condition     = var.marker_wait_interval_seconds >= 1 && var.marker_wait_interval_seconds <= 60
     error_message = "marker_wait_interval_seconds must be between 1 and 60."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

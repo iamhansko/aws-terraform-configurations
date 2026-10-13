@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 # One VPC for both clusters, as the _monolithic template had it. That is deliberate rather than
 # incidental: the two clusters differ in exactly one setting, so sharing the network removes it as a
@@ -212,6 +234,7 @@ module "vscode_ec2" {
   key_name                    = module.key_pair.key_name
   instance_type               = var.vscode_instance_type
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   marker_file_path            = var.marker_file_path
   # Both clusters' security groups, so this instance can reach either API server. The module is handed an
   # ID list and never learns what they belong to (rules.md B-6).
@@ -315,7 +338,7 @@ locals {
     vscode_port_forward_command = {
       order       = 0
       title       = "Connect to code-server through SSM"
-      description = "Run this on your own machine rather than here: it needs the AWS CLI and the Session Manager plugin installed locally, and it keeps running until you stop it. While it runs, http://localhost:${module.vscode_ec2.code_server_port} is this IDE. The tunnel rides the SSM agent's own outbound connection, so the security group needs no inbound rule for it - which is what lets allow_inbound_from_anywhere stay false. Changing both port numbers reaches anything else listening on the instance, such as the application port-forward below. SessionManagerPlugin is not found means the plugin is missing locally, not a permissions problem; TargetNotConnected means the agent on the instance has not registered with Systems Manager"
+      description = "Run this on your own machine rather than here: it needs the AWS CLI and the Session Manager plugin installed locally, and it keeps running until you stop it. While it runs, http://localhost:${module.vscode_ec2.code_server_port} is this IDE. The tunnel rides the SSM agent's own outbound connection and remains an alternative to the public URL. Changing both port numbers reaches anything else listening on the instance, such as the application port-forward below. SessionManagerPlugin is not found means the plugin is missing locally, not a permissions problem; TargetNotConnected means the agent on the instance has not registered with Systems Manager"
       # --region because the instance lives where this configuration was applied, which need not be the
       # CLI's default region on the machine running the command.
       value = "aws ssm start-session --region ${data.aws_region.current.region} --target ${module.vscode_ec2.instance_id} --document-name AWS-StartPortForwardingSession --parameters '{\"portNumber\":[\"${module.vscode_ec2.code_server_port}\"],\"localPortNumber\":[\"${module.vscode_ec2.code_server_port}\"]}'"
@@ -323,9 +346,8 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server"
-      description = "Open the IDE here, once the port forward above is running. Its kubeconfig has one context per cluster, named after the cluster - run the same command against both with \"kubectl --context <name>\", which is the whole demo"
-      # The public address only when the security group admits it; otherwise a URL that would time out.
-      value = var.allow_inbound_from_anywhere ? module.vscode_ec2.vscode_url : "http://localhost:${module.vscode_ec2.code_server_port}"
+      description = "Open this public URL from the machine whose IPv4 address Terraform detected. Its kubeconfig has one context per cluster, named after the cluster - run the same command against both with \"kubectl --context <name>\", which is the whole demo"
+      value       = module.vscode_ec2.vscode_url
     }
     clusters = {
       order       = 2

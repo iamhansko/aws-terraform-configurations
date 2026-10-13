@@ -74,8 +74,8 @@ variable "code_server_version" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether code-server's port is open to 0.0.0.0/0, as the _monolithic template opened it. code-server is configured with auth: none, so while this is true the vscode_url output is the only thing standing between the internet and a shell in this account"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "ssh_ingress_cidr_blocks" {
   type        = list(string)
@@ -348,5 +348,16 @@ variable "step_wait_interval_seconds" {
   validation {
     condition     = var.step_wait_interval_seconds >= 1
     error_message = "step_wait_interval_seconds must be at least 1."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

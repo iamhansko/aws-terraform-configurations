@@ -23,7 +23,7 @@ The target trust uses the always-existing source account root as its IAM princip
 
 ## Workbench access
 
-The workbench defaults to no inbound security-group rule. Run the `vscode_port_forward_command` output on a machine with the Session Manager plugin, then open the `vscode_url` (`http://localhost:8000` by default). Setting `allow_inbound_from_anywhere = true` exposes code-server without authentication and is appropriate only for a disposable, isolated demo.
+The workbench security group admits the public IPv4 `/32` detected from the machine running Terraform by default, so `vscode_url` is directly usable from that address. The `vscode_port_forward_command` remains available as an SSM alternative. Setting `allow_inbound_from_anywhere = true` exposes code-server without authentication to every IPv4 source and is appropriate only for a disposable, isolated demo.
 
 ## Destroy
 

@@ -101,13 +101,32 @@ variable "security_group_name_prefix" {
 
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  description = "Whether 0.0.0.0/0 may reach code_server_port."
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only my_ip_cidr"
+}
+
+variable "my_ip_cidr" {
+  type        = string
+  default     = null
+  description = "Public IPv4 /32 supplied by the root and used as the controlled ingress source when allow_inbound_from_anywhere is false"
+
+  validation {
+    condition = (
+      var.my_ip_cidr == null ||
+      (can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}/32$", var.my_ip_cidr)) && can(cidrhost(var.my_ip_cidr, 0)))
+    )
+    error_message = "my_ip_cidr must be a valid IPv4 host CIDR such as 203.0.113.10/32, or null when allow_inbound_from_anywhere is true."
+  }
+  validation {
+    condition     = var.allow_inbound_from_anywhere || var.my_ip_cidr != null
+    error_message = "my_ip_cidr must be supplied when allow_inbound_from_anywhere is false. Pass the public IPv4 /32 detected by the root data.http.my_ip lookup."
+  }
 }
 
 variable "ingress_prefix_list_ids" {
   type        = list(string)
   default     = []
-  description = "Static managed prefix-list IDs allowed to reach code-server."
+  description = "Managed prefix list IDs additionally allowed inbound on code_server_port. They are additive to the source selected by allow_inbound_from_anywhere (0.0.0.0/0 or my_ip_cidr)"
 
   validation {
     condition     = alltrue([for id in var.ingress_prefix_list_ids : can(regex("^pl-[0-9a-f]+$", id))])

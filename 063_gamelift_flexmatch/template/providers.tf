@@ -7,6 +7,7 @@ terraform {
     # Zips the handler of modules/s3_object_waiter, the function that holds the Lambda functions and the
     # GameLift build until the workbench's uploads are in S3.
     archive = { source = "hashicorp/archive", version = "~> 2.4" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 provider "aws" {

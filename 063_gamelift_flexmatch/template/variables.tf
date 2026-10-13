@@ -122,8 +122,8 @@ variable "code_server_port" {
 }
 variable "inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether code-server is reachable from 0.0.0.0/0. The _monolithic template's InboundFromAnywhere parameter was the string \"True\"/\"False\"; a bool says the same thing. code-server runs with auth: none on an instance whose role has AdministratorAccess - set false and use Session Manager port forwarding for anything but a short demo"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "key_rsa_bits" {
   type        = number
@@ -712,5 +712,16 @@ variable "player_stream_starting_position" {
   validation {
     condition     = contains(["TRIM_HORIZON", "LATEST"], var.player_stream_starting_position)
     error_message = "player_stream_starting_position must be TRIM_HORIZON or LATEST."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

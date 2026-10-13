@@ -19,20 +19,18 @@ resource "aws_security_group" "vscode_ec2_security_group" {
   }
 }
 resource "aws_vpc_security_group_ingress_rule" "code_server_from_anywhere" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.vscode_ec2_security_group.id
-  description       = "code-server from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "code-server from anywhere" : "code-server from My IP"
   ip_protocol       = "tcp"
   from_port         = var.code_server_port
   to_port           = var.code_server_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
-# The only way in when CloudFront fronts the instance. The _monolithic template took the prefix list ID out of a
-# hardcoded seventeen-region table; the root looks it up by name and passes the ID in.
-#
-# A prefix list rule is charged against the group's rule quota at the list's max entries, not as one rule -
-# the CloudFront origin-facing list alone uses most of the default 60 inbound rules, which is why nothing
-# else is added here.
+# CloudFront is the preferred HTTPS path, and this prefix-list rule is additive to the direct source selected
+# above (My IP /32 by default, or 0.0.0.0/0 by explicit opt-in). The _monolithic template took the prefix
+# list ID from a hardcoded region table; the root now looks it up by name. A prefix-list rule consumes the
+# list's maximum entry count against the security-group quota rather than counting as one rule.
 resource "aws_vpc_security_group_ingress_rule" "code_server_from_prefix_list" {
   for_each          = var.ingress_prefix_lists
   security_group_id = aws_security_group.vscode_ec2_security_group.id

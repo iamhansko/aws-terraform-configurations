@@ -105,8 +105,26 @@ variable "security_group_description" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to code_server_port from 0.0.0.0/0, as the _monolithic template did. code-server runs with auth: none, so while this is true the URL in the outputs is the only credential there is. Set it false and reach code-server over SSM Session Manager port forwarding instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only my_ip_cidr"
+}
+
+variable "my_ip_cidr" {
+  type        = string
+  default     = null
+  description = "Public IPv4 /32 supplied by the root and used as the controlled ingress source when allow_inbound_from_anywhere is false"
+
+  validation {
+    condition = (
+      var.my_ip_cidr == null ||
+      (can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}/32$", var.my_ip_cidr)) && can(cidrhost(var.my_ip_cidr, 0)))
+    )
+    error_message = "my_ip_cidr must be a valid IPv4 host CIDR such as 203.0.113.10/32, or null when allow_inbound_from_anywhere is true."
+  }
+  validation {
+    condition     = var.allow_inbound_from_anywhere || var.my_ip_cidr != null
+    error_message = "my_ip_cidr must be supplied when allow_inbound_from_anywhere is false. Pass the public IPv4 /32 detected by the root data.http.my_ip lookup."
+  }
 }
 variable "ssh_ingress_cidr_blocks" {
   type        = list(string)

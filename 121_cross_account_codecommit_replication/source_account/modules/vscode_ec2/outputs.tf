@@ -9,8 +9,8 @@ output "public_ip" {
 }
 
 output "vscode_url" {
-  value       = var.allow_inbound_from_anywhere || length(var.ingress_prefix_list_ids) > 0 ? "http://${aws_instance.workbench.public_ip}:${var.code_server_port}" : "http://localhost:${var.code_server_port}"
-  description = "Code-server URL: the public address when ingress is enabled, otherwise localhost through the root output's SSM port-forward command."
+  value       = "http://${aws_instance.workbench.public_ip}:${var.code_server_port}"
+  description = "Public code-server URL, reachable from my_ip_cidr by default, from every IPv4 source when allow_inbound_from_anywhere is true, and from any additional managed prefix lists."
 }
 
 output "iam_role_arn" {

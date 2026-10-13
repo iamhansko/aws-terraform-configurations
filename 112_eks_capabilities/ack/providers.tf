@@ -8,6 +8,7 @@ terraform {
     # cluster endpoint is still unknown - so it fails with "no client config" (rules.md E-2).
     # alekc/kubectl is the maintained fork of gavinbunney/kubectl.
     kubectl = { source = "alekc/kubectl", version = "~> 2.4" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 

@@ -152,16 +152,7 @@ variable "code_server_version" {
 variable "allow_inbound_from_anywhere" {
   type        = bool
   default     = false
-  description = <<-DESC
-    Whether the workbench security group accepts traffic from 0.0.0.0/0 on the code-server port.
-
-    False, which is the point of this project's shape: the instance is reached through CloudFront, and its
-    only ingress rule is the CloudFront origin-facing prefix list. That is the one thing this template does
-    better than most of the others in this repository, which open 8000 to the world.
-
-    Setting it true does not disable the prefix list rule - it adds a second, wider one - so it is a way to
-    bypass CloudFront for debugging rather than a replacement for it.
-  DESC
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "cloudfront_prefix_list_name" {
   type        = string
@@ -314,5 +305,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > var.q_cli_timeout_seconds
     error_message = "readme_timeout_seconds must be greater than q_cli_timeout_seconds: the README association waits for it to finish, and SSM reports a timeout only as \"unexpected state 'Failed'\"."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

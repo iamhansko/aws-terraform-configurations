@@ -6,11 +6,11 @@
 # description ("Variables not allowed"), so the wording is a literal on both sides.
 output "vscode_port_forward_command" {
   value       = local.outputs.vscode_port_forward_command.value
-  description = "Run on your own machine with the AWS CLI and the Session Manager plugin installed, and keep it running - vscode_url answers only while it does. The tunnel uses the SSM agent's outbound connection, so it needs no inbound rule on the instance"
+  description = "Optional SSM port-forward command. The public vscode_url is reachable from the detected My IP by default; this tunnel uses the SSM agent's outbound connection and needs no inbound rule"
 }
 output "vscode_url" {
   value       = local.outputs.vscode_url.value
-  description = "Open the IDE here once vscode_port_forward_command is running: localhost, or the instance's public address when allow_inbound_from_anywhere is true. Its kubeconfig has one context per cluster, named after the cluster"
+  description = "Public IDE URL, reachable from the detected My IP by default or every IPv4 source when allow_inbound_from_anywhere is true. Its kubeconfig has one context per cluster"
 }
 output "clusters" {
   value       = local.outputs.clusters.value

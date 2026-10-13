@@ -266,8 +266,8 @@ variable "aws_load_balancer_controller_chart_version" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the workbench security group accepts traffic from 0.0.0.0/0 on the code-server port. True as the _monolithic template had it - a bool here where that template used a string validated against [\"True\", \"False\"], so \"true\" would have been rejected. code-server has no authentication in front of it"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_instance_type" {
   type        = string
@@ -297,5 +297,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > 0
     error_message = "readme_timeout_seconds must be positive."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

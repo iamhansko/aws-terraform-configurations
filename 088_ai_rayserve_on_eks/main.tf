@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 
 # The addresses CloudFront's edge locations make origin requests from.
@@ -238,6 +260,7 @@ module "alb_security_group" {
     serve = var.serve_port
   }
   allow_inbound_from_anywhere = var.alb_allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   # The bastion, which is where the endpoint is called from while the ALB is internal. A map
   # with a literal key because the ID is another module's output, unknown until apply
   # (rules.md B-8). The cluster security group both of them carry would admit this too, but
@@ -373,10 +396,11 @@ module "vscode_ec2" {
   instance_type       = var.bastion_instance_type
   code_server_version = var.code_server_version
   security_group_name = "${var.project_name}-bastion-sg"
-  # False, as the _monolithic template had it: the only inbound rule is the CloudFront
-  # origin-facing prefix list below, so the IDE is reached through the distribution - or
-  # through the SSM port forward in the outputs, which needs no inbound rule at all.
+  # The CloudFront origin-facing prefix list is additive. False, the default, also admits the detected My IP
+  # /32 directly; true replaces that selected source with 0.0.0.0/0. The SSM port-forward output remains an
+  # alternative that needs no inbound rule.
   allow_inbound_from_anywhere = var.allow_bastion_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   ingress_prefix_list_ids     = [data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id]
   marker_file_path            = var.marker_file_path
   # Carrying the cluster security group is what lets kubectl on this instance reach the API
@@ -501,7 +525,7 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server"
-      description = "Open the IDE here. It is served through CloudFront over HTTPS; the instance's own port is only open to the CloudFront origin-facing prefix list"
+      description = "Open the IDE through this preferred CloudFront HTTPS URL. The instance port also admits the detected My IP /32 by default; allow_bastion_inbound_from_anywhere = true replaces that selected source with 0.0.0.0/0"
       value       = module.cloudfront_code_server.url
     }
     cluster_name = {

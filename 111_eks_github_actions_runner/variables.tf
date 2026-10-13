@@ -290,8 +290,8 @@ variable "runner_container_mode" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the workbench security group accepts traffic from 0.0.0.0/0 on the code-server port. True as the _monolithic template had it - a bool here where that template used a string validated against [\"True\", \"False\"], so \"true\" would have been rejected. code-server has no authentication in front of it"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_instance_type" {
   type        = string
@@ -353,5 +353,16 @@ variable "verify_timeout_seconds" {
     # condition (rules.md B-1). 300 seconds of margin for the bootstrap this check waits on.
     condition     = var.verify_timeout_seconds >= var.verify_attempts * 10 + 300
     error_message = "verify_timeout_seconds must leave room for verify_attempts ten-second polls plus the instance bootstrap the check waits for - at least verify_attempts * 10 + 300. Otherwise SSM reports a timeout before the check can print the controller log that explains the failure."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

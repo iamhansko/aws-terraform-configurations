@@ -5,6 +5,7 @@ terraform {
     tls        = { source = "hashicorp/tls", version = "~> 4.0" }
     kubectl    = { source = "alekc/kubectl", version = "~> 2.4" }
     opensearch = { source = "opensearch-project/opensearch", version = "~> 2.3" }
+    http       = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 provider "aws" {

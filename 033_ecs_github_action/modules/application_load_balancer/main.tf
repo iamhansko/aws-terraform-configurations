@@ -20,13 +20,13 @@ resource "aws_security_group" "load_balancer_security_group" {
 }
 # Standalone rules rather than inline blocks (rules.md F-2).
 resource "aws_vpc_security_group_ingress_rule" "listener_from_anywhere" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.load_balancer_security_group.id
-  description       = "Listener port from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "Listener port from anywhere" : "Listener port from My IP"
   ip_protocol       = "tcp"
   from_port         = var.listener_port
   to_port           = var.listener_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 # The rule the _monolithic template was missing entirely. Its group had one ingress block and no egress
 # block, and Terraform revokes the allow-all egress AWS puts on a new group as soon as any inline rule is

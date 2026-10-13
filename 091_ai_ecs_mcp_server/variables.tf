@@ -79,6 +79,11 @@ variable "code_server_version" {
     error_message = "code_server_version must be a semantic version, e.g. 4.102.3."
   }
 }
+variable "allow_inbound_from_anywhere" {
+  type        = bool
+  default     = false
+  description = "Whether the workbench code-server rule uses 0.0.0.0/0. When false (the default), it uses only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
+}
 variable "ecs_ami_ssm_parameter_name" {
   type        = string
   default     = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
@@ -317,5 +322,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > var.q_cli_timeout_seconds
     error_message = "readme_timeout_seconds must be greater than q_cli_timeout_seconds: the README association waits for that step to finish, and SSM reports a timeout only as \"unexpected state 'Failed'\"."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

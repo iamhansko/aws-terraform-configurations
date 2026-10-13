@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 module "network" {
   source = "./modules/network"
@@ -32,6 +54,7 @@ module "vscode_ec2" {
   iam_policy_arns             = var.vscode_iam_policy_arns
   security_group_name         = "${var.prefix}-vscode-sg"
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   # Lets the README association below know when the bootstrap has finished
   # (rules.md H-2). The module touches <path>/userdata as its last step.
   marker_file_path = var.marker_file_path
@@ -127,7 +150,7 @@ locals {
     port_forward_command = {
       order       = 5
       title       = "Reach code-server without opening a port"
-      description = "Forwards the code-server port to localhost through SSM, then open http://localhost:8000. The safe way to use this instance with allow_inbound_from_anywhere set to false"
+      description = "Forwards the code-server port to localhost through SSM, then open http://localhost:8000. This remains an alternative that does not depend on the detected My IP rule"
       value       = "aws ssm start-session --target ${module.vscode_ec2.instance_id} --document-name AWS-StartPortForwardingSession --parameters '{\"portNumber\":[\"${module.vscode_ec2.code_server_port}\"],\"localPortNumber\":[\"${module.vscode_ec2.code_server_port}\"]}'"
     }
     docker_check_command = {

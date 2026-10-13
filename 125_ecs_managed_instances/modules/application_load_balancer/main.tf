@@ -23,13 +23,13 @@ resource "aws_security_group" "load_balancer" {
 # Standalone rules rather than inline blocks (rules.md F-2), and conditional, as the _monolithic template's
 # InboundFromAnywhere parameter made them.
 resource "aws_vpc_security_group_ingress_rule" "listener_from_anywhere" {
-  for_each          = var.allow_inbound_from_anywhere ? local.listener_ports : {}
+  for_each          = local.listener_ports
   security_group_id = aws_security_group.load_balancer.id
-  description       = "${upper(each.key)} listener from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "${upper(each.key)} listener from anywhere" : "${upper(each.key)} listener from My IP"
   ip_protocol       = "tcp"
   from_port         = each.value
   to_port           = each.value
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 # The rule the _monolithic template's groups were missing. They had ingress only, and Terraform removes the
 # allow-all egress AWS puts on a new group, so neither ALB could open a connection to a target: every health

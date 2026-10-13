@@ -130,8 +130,8 @@ variable "vscode_instance_type" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) on the VS Code EC2 instance from 0.0.0.0/0. Leave false and use SSM Session Manager port forwarding for anything but a short-lived demo"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "kubectl_download_version" {
   type        = string
@@ -197,4 +197,15 @@ variable "enable_backend_security_group" {
   type        = bool
   default     = false
   description = "Whether the AWS Load Balancer Controller uses a shared backend security group (the k8s-traffic-<cluster>-<hash> group it creates, attaches to every load balancer, and names as the traffic source in the rules it adds to node/ENI security groups). False in this variant, as in all of them: the workload supplies its own frontend security group but sets no manage-backend-security-group-rules annotation, so the controller writes no node-side rules and needs no shared group to name as their source. The load balancer carries only the frontend security group this configuration declares, and the path from it to the pods is the load_balancer_to_pods rule on the cluster security group in main.tf. Setting that annotation while this is false is the combination the controller rejects, and it then provisions nothing at all. The trade-off is a rule per load balancer on the cluster security group instead of one shared rule, which only matters once there are many (rules.md G-2)"
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
+  }
 }

@@ -216,7 +216,7 @@ variable "app_replicas_with_time_slicing" {
 variable "allow_inbound_from_anywhere" {
   type        = bool
   default     = false
-  description = "Whether the VS Code security group accepts traffic from 0.0.0.0/0 on the code-server port. False, where the _monolithic template defaulted to True: code-server has no authentication in front of it and its instance role is AdministratorAccess, in a project running four GPU instances. The IDE is reached through the SSM port forward in vscode_port_forward_command instead, which needs no inbound rule"
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "vscode_instance_type" {
   type        = string
@@ -246,5 +246,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > 0
     error_message = "readme_timeout_seconds must be positive."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

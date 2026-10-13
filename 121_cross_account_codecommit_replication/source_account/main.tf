@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 data "aws_region" "current" {}
@@ -84,6 +106,7 @@ module "vscode_ec2" {
   code_server_port            = var.code_server_port
   security_group_name_prefix  = var.vscode_security_group_name_prefix
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   ingress_prefix_list_ids     = var.ingress_prefix_list_ids
   iam_policy_arns             = var.vscode_iam_policy_arns
   marker_file_path            = var.marker_file_path
@@ -125,7 +148,7 @@ locals {
     vscode_url = {
       order       = 3
       title       = "VS Code workbench URL"
-      description = "Private-by-default code-server URL. Run vscode_port_forward_command before opening the localhost address; public ingress is an explicit opt-in"
+      description = "Public code-server URL, restricted to the detected My IP by default; setting allow_inbound_from_anywhere true admits every IPv4 source"
       value       = module.vscode_ec2.vscode_url
     }
     source_region = {
@@ -220,8 +243,8 @@ locals {
     }
     vscode_port_forward_command = {
       order       = 20
-      title       = "Open the private workbench tunnel"
-      description = "Run on the machine where you want to open code-server. The default security group has no inbound rule, so Session Manager forwards localhost securely"
+      title       = "Optional SSM workbench tunnel"
+      description = "Alternative to the public URL that forwards code-server to localhost through the SSM agent's outbound connection and needs no inbound rule"
       value       = "aws ssm start-session --target ${module.vscode_ec2.instance_id} --document-name AWS-StartPortForwardingSession --parameters '{\"portNumber\":[\"${var.code_server_port}\"],\"localPortNumber\":[\"${var.code_server_port}\"]}' --region ${data.aws_region.current.region}"
     }
     private_key_command = {

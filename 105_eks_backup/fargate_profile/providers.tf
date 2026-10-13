@@ -9,6 +9,7 @@ terraform {
     # config" (rules.md E-2). alekc/kubectl is the maintained fork of gavinbunney/kubectl.
     kubectl = { source = "alekc/kubectl", version = "~> 2.4" }
     helm    = { source = "hashicorp/helm", version = "~> 3.0" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 

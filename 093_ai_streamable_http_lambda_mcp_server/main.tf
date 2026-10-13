@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 # An MCP server on Lambda, reached over streamable HTTP through API Gateway with a bearer token, and the
 # Amazon Q CLI on a code-server workbench configured to use it.
 #
@@ -73,8 +95,8 @@ module "key_pair" {
   # Uses nothing from network and waits anyway, so the root has no exception to reason about (rules.md D-3).
   depends_on = [module.network]
 }
-# The workbench - the _monolithic template's bastion. Reached through CloudFront; its only ingress rule is the
-# CloudFront origin-facing prefix list.
+# The workbench - the _monolithic template's bastion. CloudFront is the preferred HTTPS path; its prefix-list
+# rule is additive to direct access from the detected My IP /32 by default, or 0.0.0.0/0 by explicit opt-in.
 module "vscode_ec2" {
   source = "./modules/vscode_ec2"
 
@@ -86,6 +108,7 @@ module "vscode_ec2" {
   code_server_version         = var.code_server_version
   security_group_name         = "${var.project_name}-vscode-sg"
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   ingress_prefix_list_ids     = [data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id]
   iam_policy_arns             = var.vscode_iam_policy_arns
   marker_file_path            = var.marker_file_path
@@ -412,7 +435,7 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server, through CloudFront"
-      description = "Open the IDE here. The instance accepts its port only from CloudFront, so this URL is the way in. It answers once the distribution reads Deployed, several minutes after apply returns"
+      description = "Preferred HTTPS IDE URL through CloudFront. The instance port also admits the detected My IP /32 directly by default, or 0.0.0.0/0 by explicit opt-in. This URL answers once the distribution reads Deployed, several minutes after apply returns"
       value       = module.cloudfront.url
     }
     security_note = {

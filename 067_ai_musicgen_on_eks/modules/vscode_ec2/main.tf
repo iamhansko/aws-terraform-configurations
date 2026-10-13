@@ -9,22 +9,17 @@ resource "aws_security_group" "vscode_ec2_security_group" {
     Name = var.security_group_name
   }
 }
-# Standalone rule resources rather than inline ingress/egress blocks (rules.md F-2), moved when the
-# root's allow_inbound_from_anywhere default became false.
-#
-# The inline form could not be trusted to close the port. Both of its ingress blocks were dynamic, and
-# ingress is processed in attributes-as-blocks mode, where a dynamic block that expands to nothing
-# leaves the argument unset rather than empty - which the provider reads as "keep the existing rules".
-# With no prefix lists here, turning allow_inbound_from_anywhere off on a group that already had the
-# rule would plan "No changes" and leave 0.0.0.0/0 open. A count of zero destroys the rule instead.
+# Standalone rule resources rather than inline ingress/egress blocks (rules.md F-2). This module already
+# owned the selected ingress as a standalone address, so count remains one and changing the switch updates
+# only its CIDR: My IP /32 by default, or 0.0.0.0/0 by explicit opt-in.
 resource "aws_vpc_security_group_ingress_rule" "vscode_ec2_anywhere_ingress" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.vscode_ec2_security_group.id
-  description       = "code-server from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "code-server from anywhere" : "code-server from My IP"
   ip_protocol       = "tcp"
   from_port         = var.code_server_port
   to_port           = var.code_server_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 # count over the list's length rather than for_each over its values: a prefix list ID is usually a
 # data source's result, and its length is known at plan time even when its value is not (rules.md B-8).

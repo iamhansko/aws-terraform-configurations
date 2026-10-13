@@ -13,14 +13,13 @@ resource "aws_security_group" "workbench" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "code_server_from_anywhere" {
-  count = var.allow_inbound_from_anywhere ? 1 : 0
-
+  count             = 1
   security_group_id = aws_security_group.workbench.id
-  description       = "code-server from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "code-server from anywhere" : "code-server from My IP"
   ip_protocol       = "tcp"
   from_port         = var.code_server_port
   to_port           = var.code_server_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 
 resource "aws_vpc_security_group_ingress_rule" "code_server_from_prefix_list" {

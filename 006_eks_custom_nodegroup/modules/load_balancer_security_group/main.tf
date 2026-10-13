@@ -1,3 +1,21 @@
+# Keep the switch-selected source and explicit CIDRs additive without asking EC2 to create an equivalent
+# permission twice. EC2 canonicalizes CIDRs before duplicate detection, so canonicalize the explicit list and
+# remove the selected source before deriving resource instances.
+locals {
+  selected_ingress_cidr = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
+  selected_ingress_cidr_canonical = local.selected_ingress_cidr == null ? null : try(
+    "${cidrhost(local.selected_ingress_cidr, 0)}/${split("/", local.selected_ingress_cidr)[1]}",
+    local.selected_ingress_cidr,
+  )
+  additional_ingress_cidr_blocks = toset([
+    for cidr in var.ingress_cidr_blocks : try(
+      "${cidrhost(cidr, 0)}/${split("/", cidr)[1]}",
+      cidr,
+    )
+    if try("${cidrhost(cidr, 0)}/${split("/", cidr)[1]}", cidr) != local.selected_ingress_cidr_canonical
+  ])
+}
+
 # The frontend security group for a load balancer the AWS Load Balancer
 # Controller manages. Created here rather than left to the controller so the
 # inbound rules are reviewable in the plan, and referenced from the Ingress or
@@ -26,16 +44,16 @@ resource "aws_security_group" "load_balancer_security_group" {
 # controller can add rules of its own to this group without Terraform reverting
 # them on the next apply - inline blocks are authoritative over the whole group.
 resource "aws_vpc_security_group_ingress_rule" "load_balancer_anywhere_ingress" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.load_balancer_security_group.id
-  description       = "Listener port from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "Listener port from anywhere" : "Listener port from My IP"
   ip_protocol       = "tcp"
   from_port         = var.port
   to_port           = var.port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = local.selected_ingress_cidr
 }
 resource "aws_vpc_security_group_ingress_rule" "load_balancer_cidr_ingress" {
-  for_each          = toset(var.ingress_cidr_blocks)
+  for_each          = local.additional_ingress_cidr_blocks
   security_group_id = aws_security_group.load_balancer_security_group.id
   description       = "Listener port from an explicitly allowed CIDR block"
   ip_protocol       = "tcp"

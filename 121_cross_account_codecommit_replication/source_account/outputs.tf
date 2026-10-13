@@ -93,7 +93,7 @@ output "artifact_bucket_name" {
 
 output "vscode_port_forward_command" {
   value       = local.outputs.vscode_port_forward_command.value
-  description = "Session Manager command that forwards the private-by-default code-server port to localhost."
+  description = "Optional Session Manager command that forwards code-server to localhost without using an inbound rule."
 }
 
 output "private_key_command" {

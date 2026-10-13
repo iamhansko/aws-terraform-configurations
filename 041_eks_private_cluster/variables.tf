@@ -264,13 +264,13 @@ variable "vscode_code_server_port" {
 }
 variable "allow_vscode_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the VS Code security group accepts traffic on vscode_code_server_port from 0.0.0.0/0. True, so the IDE is reachable from a browser without a tunnel. Note what that means: code-server here has no authentication in front of it, so anyone who finds the address gets a shell on an instance whose role is cluster-admin on the EKS cluster. Set it false and reach the IDE through SSM Session Manager port forwarding, or leave it false and pass ingress_prefix_list_ids so only CloudFront edge locations can connect"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "allow_load_balancer_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether the ALB security group accepts traffic on alb_port from 0.0.0.0/0. Separate from the VS Code switch because the two exposures are unrelated: this one reaches a demo nginx through the load balancer, the other one reaches an unauthenticated IDE. One variable for both would mean opening the IDE to change the demo, or the reverse"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "aws_load_balancer_controller_chart_version" {
   type        = string
@@ -374,5 +374,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds > 0
     error_message = "readme_timeout_seconds must be positive."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

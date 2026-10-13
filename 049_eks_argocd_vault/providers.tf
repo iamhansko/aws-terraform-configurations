@@ -7,6 +7,7 @@ terraform {
     helm    = { source = "hashicorp/helm", version = "~> 3.0" }
     kubectl = { source = "alekc/kubectl", version = "~> 2.4" }
     github  = { source = "integrations/github", version = "~> 6.0" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 provider "aws" {

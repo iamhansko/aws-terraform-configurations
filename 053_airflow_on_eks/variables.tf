@@ -432,8 +432,8 @@ variable "code_server_version" {
 }
 variable "allow_inbound_from_anywhere" {
   type        = bool
-  default     = true
-  description = "Whether to allow inbound access to the code-server port (8000) from 0.0.0.0/0, as the _monolithic template's InboundFromAnywhere parameter did. code-server here runs with auth: none, so this is an unauthenticated editor on the public internet with an AdministratorAccess instance role and cluster-admin behind it - set false and reach it through SSM Session Manager port forwarding instead"
+  default     = false
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 variable "marker_file_path" {
   type        = string
@@ -453,5 +453,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds >= 600
     error_message = "readme_timeout_seconds must be at least 600; the bootstrap downloads several tools before the marker appears."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

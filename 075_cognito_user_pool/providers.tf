@@ -4,6 +4,7 @@ terraform {
     aws     = { source = "hashicorp/aws", version = "~> 6.0" }
     archive = { source = "hashicorp/archive", version = "~> 2.4" }
     tls     = { source = "hashicorp/tls", version = "~> 4.0" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 provider "aws" {

@@ -26,16 +26,16 @@ resource "aws_vpc_security_group_egress_rule" "all_outbound" {
   ip_protocol       = "-1"
   cidr_ipv4         = "0.0.0.0/0"
 }
-# code-server, reachable from anywhere by default because that is what the _monolithic template declared and
-# it is the only way in to the workbench. See the variable for what that exposes.
+# code-server is restricted to the detected My IP /32 by default. Setting allow_inbound_from_anywhere to true
+# explicitly restores the _monolithic template's 0.0.0.0/0 source; see the variable for what that exposes.
 resource "aws_vpc_security_group_ingress_rule" "code_server_from_anywhere" {
-  count             = var.allow_inbound_from_anywhere ? 1 : 0
+  count             = 1
   security_group_id = aws_security_group.vscode_ec2_security_group.id
-  description       = "code-server from anywhere"
+  description       = var.allow_inbound_from_anywhere ? "code-server from anywhere" : "code-server from My IP"
   ip_protocol       = "tcp"
   from_port         = var.code_server_port
   to_port           = var.code_server_port
-  cidr_ipv4         = "0.0.0.0/0"
+  cidr_ipv4         = var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr
 }
 # for_each over the CIDR list rather than one resource per source. These are literals in configuration, so
 # toset is safe - unlike a security group ID arriving from another module (rules.md B-8).

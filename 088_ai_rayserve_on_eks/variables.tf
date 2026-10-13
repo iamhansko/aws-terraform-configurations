@@ -346,20 +346,7 @@ variable "alb_security_group_name" {
 variable "alb_allow_inbound_from_anywhere" {
   type        = bool
   default     = false
-  description = <<-DESC
-    Whether the Ray Serve ALB is open to the internet. It decides two things together: the frontend security
-    group's 0.0.0.0/0 rule, and the Ingress scheme - internet-facing when true, internal when false.
-
-    False. The endpoint has no authentication in front of it and every request it serves runs on a GPU
-    instance, so an open address is an open invitation to spend on that capacity. Internal is the scheme
-    that makes false usable rather than merely closed: an internet-facing ALB sees the bastion's public
-    address, which no security group reference matches, so with the 0.0.0.0/0 rule gone nothing could reach
-    it at all. Internal, it is reached from the IDE terminal over private addresses, which the frontend
-    group admits by naming the bastion's security group.
-
-    Changing this replaces the ALB: ELB cannot change a load balancer's scheme in place, so the controller
-    builds a new one and the address changes.
-  DESC
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 
 variable "serve_port" {
@@ -479,7 +466,7 @@ variable "bastion_instance_type" {
 variable "allow_bastion_inbound_from_anywhere" {
   type        = bool
   default     = false
-  description = "Whether the bastion's security group accepts code-server traffic from 0.0.0.0/0. False, as the _monolithic template had it: the only inbound rule is the CloudFront origin-facing prefix list, so the IDE is reached through the distribution rather than directly"
+  description = "Whether the controlled inbound rules use 0.0.0.0/0. When false (the default), they use only the public IPv4 /32 dynamically returned by my_ip_lookup_url"
 }
 
 variable "cloudfront_prefix_list_name" {
@@ -556,5 +543,16 @@ variable "readme_timeout_seconds" {
   validation {
     condition     = var.readme_timeout_seconds >= 300
     error_message = "readme_timeout_seconds must be at least 300."
+  }
+}
+
+variable "my_ip_lookup_url" {
+  type        = string
+  default     = "https://checkip.amazonaws.com/"
+  description = "Trusted HTTPS endpoint that returns the public IPv4 address of the machine running Terraform. The address is converted to a /32 and used when an allow_inbound_from_anywhere switch is false"
+
+  validation {
+    condition     = startswith(var.my_ip_lookup_url, "https://")
+    error_message = "my_ip_lookup_url must be an HTTPS URL because its response controls which source address the security groups admit."
   }
 }

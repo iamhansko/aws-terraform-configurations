@@ -9,6 +9,7 @@ terraform {
     # time_sleep in main.tf, which closes a two-second race between a member cluster registering itself and
     # Karmada scheduling the demo workload.
     time = { source = "hashicorp/time", version = "~> 0.12" }
+    http = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 provider "aws" {

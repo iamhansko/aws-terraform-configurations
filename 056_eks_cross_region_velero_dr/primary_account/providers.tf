@@ -5,6 +5,7 @@ terraform {
     tls     = { source = "hashicorp/tls", version = "~> 4.0" }
     helm    = { source = "hashicorp/helm", version = "~> 3.0" }
     kubectl = { source = "alekc/kubectl", version = "~> 2.4" }
+    http    = { source = "hashicorp/http", version = "~> 3.4" }
   }
 }
 # The source half of the cross-region, cross-account pair: this root builds the cluster the backup is

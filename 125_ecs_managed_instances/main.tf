@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 # The public zone, looked up by name unless its ID is given. In the root rather than inside the certificate
 # module, so a depends_on on that module can never defer this read to apply (rules.md D-6).
@@ -83,6 +105,7 @@ module "shlink_alb" {
   subnet_ids                  = module.network.public_subnet_ids
   security_group_name         = "shlink-alb-sg"
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   enable_https                = true
   # The validated ARN, so the HTTPS listener is created after ISSUED rather than racing it.
   certificate_arn      = module.shlink_certificate.certificate_arn
@@ -111,6 +134,7 @@ module "web_client_alb" {
   subnet_ids                  = module.network.public_subnet_ids
   security_group_name         = "web-client-alb-sg"
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   # Plain HTTP on 80, as the _monolithic template had it. The web client is a static single-page app; the
   # API calls it makes go from the browser to the Shlink domain above, which is HTTPS.
   enable_https         = false

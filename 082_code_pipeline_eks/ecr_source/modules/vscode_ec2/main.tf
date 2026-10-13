@@ -5,14 +5,17 @@ resource "aws_security_group" "vscode_ec2_security_group" {
   description = "Security Group for the VS Code EC2 instance"
   name        = var.security_group_name
   vpc_id      = var.vpc_id
+  # Keep this pre-existing security group inline: changing rule ownership to standalone resources in
+  # one apply leaves the old inline permissions in place and EC2 rejects the duplicate rules. The
+  # selected source changes in place instead (rules.md F-2).
   dynamic "ingress" {
-    for_each = var.allow_inbound_from_anywhere ? [1] : []
+    for_each = [1]
     content {
-      description = "code-server from anywhere"
+      description = var.allow_inbound_from_anywhere ? "code-server from anywhere" : "code-server from My IP"
       protocol    = "tcp"
       from_port   = var.code_server_port
       to_port     = var.code_server_port
-      cidr_blocks = ["0.0.0.0/0"]
+      cidr_blocks = [var.allow_inbound_from_anywhere ? "0.0.0.0/0" : var.my_ip_cidr]
     }
   }
   dynamic "ingress" {

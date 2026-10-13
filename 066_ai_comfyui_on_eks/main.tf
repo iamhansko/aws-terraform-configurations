@@ -1,3 +1,25 @@
+# Resolve the public IPv4 address of the machine running Terraform once at the root. The child security
+# group modules are ordered after other modules, so putting this plan-time read inside them could defer it
+# until apply; passing only the resulting CIDR also keeps the modules independent of the lookup service
+# (rules.md B-6/D-6).
+data "http" "my_ip" {
+  url = var.my_ip_lookup_url
+
+  lifecycle {
+    postcondition {
+      condition = (
+        self.status_code == 200 &&
+        can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", trimspace(self.response_body))) &&
+        can(cidrhost("${trimspace(self.response_body)}/32", 0))
+      )
+      error_message = "my_ip_lookup_url must return HTTP 200 with one bare IPv4 address. Set it to a trusted HTTPS address-reflection endpoint reachable from the machine running Terraform."
+    }
+  }
+}
+locals {
+  my_ip_cidr = "${trimspace(data.http.my_ip.response_body)}/32"
+}
+
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
@@ -516,7 +538,8 @@ resource "terraform_data" "comfyui_image_build" {
 # the VPC origin arrives, and the workbench, so the ALB can be tried from the IDE terminal without CloudFront
 # in the path (rules.md G-1).
 module "alb_security_group" {
-  source = "./modules/load_balancer_security_group"
+  source     = "./modules/load_balancer_security_group"
+  my_ip_cidr = local.my_ip_cidr
 
   vpc_id      = module.network.vpc_id
   name        = var.alb_security_group_name
@@ -721,6 +744,7 @@ module "vscode_ec2" {
   code_server_version         = var.code_server_version
   security_group_name         = var.security_group_name
   allow_inbound_from_anywhere = var.allow_inbound_from_anywhere
+  my_ip_cidr                  = local.my_ip_cidr
   marker_file_path            = var.marker_file_path
   # The cluster security group is what lets kubectl here reach the API server without leaving the VPC. The
   # module is handed an ID list and never learns what it belongs to (rules.md B-6).
@@ -802,8 +826,8 @@ locals {
     vscode_url = {
       order       = 1
       title       = "code-server"
-      description = "Open the IDE here once the port forward above is running, and run the commands below from its terminal. The editor has no authentication and the instance role behind it is AdministratorAccess, which is why it is on the instance's public address only when allow_inbound_from_anywhere is set"
-      value       = var.allow_inbound_from_anywhere ? module.vscode_ec2.vscode_url : "http://localhost:${module.vscode_ec2.code_server_port}"
+      description = "Open this public URL from the machine whose IPv4 address Terraform detected. The editor has no authentication and the instance role behind it is AdministratorAccess; set allow_inbound_from_anywhere only for a disposable demo that must accept every IPv4 source"
+      value       = module.vscode_ec2.vscode_url
     }
     comfyui_url = {
       order       = 2
